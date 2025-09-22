@@ -115,20 +115,39 @@ export class Formatter {
       return 'No token positions found.';
     }
 
-    const headers = ['Token', 'Symbol', 'Amount', 'Price', 'Value', 'P&L', '%'];
-    const rows = positions.map(position => {
+    // Sort positions: first with balance > 0, then zero balance ones
+    const sortedPositions = [...positions].sort((a, b) => {
+      // First sort by balance (higher first)
+      if (b.balanceUiAmount !== a.balanceUiAmount) {
+        return b.balanceUiAmount - a.balanceUiAmount;
+      }
+      // Then by symbol alphabetically
+      return a.tokenInfo.symbol.localeCompare(b.tokenInfo.symbol);
+    });
+
+    const headers = ['Token', 'Symbol', 'Amount', 'Price', 'Value', 'P&L', '%', 'Status'];
+    const rows = sortedPositions.map(position => {
       const value = (position.currentPrice || 0) * position.balanceUiAmount;
       const pnl = position.unrealizedPnL || 0;
       const pnlPercent = position.unrealizedPnLPercent || 0;
 
+      // Status indicator
+      let status = '';
+      if (position.balanceUiAmount > 0) {
+        status = '✅ Active';
+      } else {
+        status = '🔍 Empty'; // Likely from recent swap
+      }
+
       return [
         position.tokenInfo.name.substring(0, 12), // Truncate long names
         position.tokenInfo.symbol.substring(0, 8),
-        this.formatNumber(position.balanceUiAmount, 4),
+        position.balanceUiAmount > 0 ? this.formatNumber(position.balanceUiAmount, 4) : '0.0000',
         position.currentPrice ? this.formatCurrency(position.currentPrice, 6) : 'N/A',
-        this.formatCurrency(value),
+        value > 0 ? this.formatCurrency(value) : '$0.00',
         pnl !== 0 ? this.colorizeValue(pnl, this.formatCurrency(Math.abs(pnl))) : 'N/A',
         pnlPercent !== 0 ? this.colorizePercentage(pnlPercent, this.formatPercent(pnlPercent)) : 'N/A',
+        status,
       ];
     });
 

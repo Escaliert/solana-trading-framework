@@ -74,40 +74,70 @@ export class WalletManager {
     }
 
     try {
+      // Get ALL token accounts including those with zero balances
       const tokenAccounts = await this.rpcClient.getParsedTokenAccounts(this.walletConnection.publicKey);
       const positions: Position[] = [];
 
+      console.log(`Found ${tokenAccounts.length} token accounts in wallet`);
+
       for (const account of tokenAccounts) {
-        // Skip accounts with zero balance, but use a very small threshold to catch dust amounts
-        const balance = parseFloat(account.tokenAmount.amount);
-        const uiBalance = parseFloat(account.tokenAmount.uiAmountString || '0');
+        // Include ALL token accounts regardless of balance
+        // This ensures we catch pump.fun tokens and recent swaps
 
-        // Skip only if both raw and UI balance are exactly zero
-        if (balance === 0 && uiBalance === 0) {
-          continue;
+        try {
+          // Add delay before each metadata request to prevent rate limiting
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          // Get token metadata from RPC client
+          const metadata = await this.rpcClient.getTokenMetadata(new PublicKey(account.mint));
+
+          const tokenInfo: TokenInfo = {
+            mint: account.mint,
+            symbol: metadata.symbol || 'Unknown',
+            name: metadata.name || 'Unknown Token',
+            decimals: metadata.decimals || account.tokenAmount.decimals,
+          };
+
+          const balance = parseFloat(account.tokenAmount.amount) || 0;
+          const uiBalance = parseFloat(account.tokenAmount.uiAmountString || '0') || 0;
+
+          const position: Position = {
+            tokenInfo,
+            balance,
+            balanceUiAmount: uiBalance,
+            mintAddress: account.mint,
+            lastUpdated: new Date(),
+          };
+
+          positions.push(position);
+
+          if (uiBalance > 0) {
+            console.log(`✅ Token found: ${tokenInfo.symbol} - Balance: ${uiBalance}`);
+          } else {
+            console.log(`🔍 Token account found: ${tokenInfo.symbol} - Zero balance (recent swap?)`);
+          }
+        } catch (error) {
+          console.warn(`Failed to get metadata for token ${account.mint}:`, error);
+
+          // Still include the token even without metadata
+          const position: Position = {
+            tokenInfo: {
+              mint: account.mint,
+              symbol: 'Unknown',
+              name: 'Unknown Token',
+              decimals: account.tokenAmount.decimals,
+            },
+            balance: parseFloat(account.tokenAmount.amount) || 0,
+            balanceUiAmount: parseFloat(account.tokenAmount.uiAmountString || '0') || 0,
+            mintAddress: account.mint,
+            lastUpdated: new Date(),
+          };
+
+          positions.push(position);
         }
-
-        // Get token metadata from RPC client
-        const metadata = await this.rpcClient.getTokenMetadata(new PublicKey(account.mint));
-
-        const tokenInfo: TokenInfo = {
-          mint: account.mint,
-          symbol: metadata.symbol,
-          name: metadata.name,
-          decimals: metadata.decimals,
-        };
-
-        const position: Position = {
-          tokenInfo,
-          balance: parseFloat(account.tokenAmount.amount),
-          balanceUiAmount: parseFloat(account.tokenAmount.uiAmountString || '0'),
-          mintAddress: account.mint,
-          lastUpdated: new Date(),
-        };
-
-        positions.push(position);
       }
 
+      console.log(`📊 Total positions detected: ${positions.length}`);
       return positions;
     } catch (error) {
       console.error('Error fetching token positions:', error);

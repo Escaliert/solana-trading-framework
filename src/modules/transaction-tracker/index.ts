@@ -22,8 +22,8 @@ export class TransactionTracker {
   private constructor() {
     this.rpcClient = SolanaRpcClient.getInstance();
     this.dbManager = DatabaseManager.getInstance();
-    // Very conservative rate limiting: 1 request per 10 seconds
-    this.rateLimiter = new RateLimiter(1, 10000, 10000);
+    // Ultra-conservative Solana RPC limits: 3 requests per 60 seconds
+    this.rateLimiter = new RateLimiter(3, 60000, 5000);
   }
 
   public static getInstance(): TransactionTracker {
@@ -41,8 +41,8 @@ export class TransactionTracker {
       const signatures = await this.getSignatures(walletAddress, limit);
       console.log(`Found ${signatures.length} signatures`);
 
-      // Analyze transactions one by one to prevent rate limiting
-      const batchSize = 1; // Process one transaction at a time
+      // Process transactions one by one to prevent rate limiting
+      const batchSize = 1; // Process 1 transaction at a time to avoid 429 errors
       const analyses: TransactionAnalysis[] = [];
 
       for (let i = 0; i < signatures.length; i += batchSize) {
@@ -72,7 +72,7 @@ export class TransactionTracker {
 
       const signatures = await RetryManager.withRetry(async () => {
         return await connection.getSignaturesForAddress(walletAddress, { limit });
-      });
+      }, 3, 5000, this.rateLimiter);
 
       return signatures;
     } catch (error) {
@@ -94,7 +94,7 @@ export class TransactionTracker {
           return await connection.getParsedTransaction(sigInfo.signature, {
             maxSupportedTransactionVersion: 0
           });
-        });
+        }, 3, 5000, this.rateLimiter);
 
         if (transaction) {
           const analysis = await this.analyzeTransaction(transaction, walletAddress, sigInfo);
@@ -254,8 +254,8 @@ export class TransactionTracker {
     try {
       console.log('🔄 Syncing transaction history...');
 
-      // Reduced from 50 to 5 to prevent rate limiting
-      const analyses = await this.fetchAndAnalyzeTransactions(walletAddress, 5);
+      // Ultra-reduced to 3 to prevent rate limiting completely
+      const analyses = await this.fetchAndAnalyzeTransactions(walletAddress, 3);
       let savedCount = 0;
 
       for (const analysis of analyses) {

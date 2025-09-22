@@ -1,5 +1,4 @@
 import { WalletManager } from '../../core/wallet-manager';
-import { PriceFeedManager } from '../price-feed';
 import { CostBasisTracker } from './cost-basis-tracker';
 import { DatabaseManager, PortfolioSnapshot } from '../../core/database';
 import { TransactionTracker } from '../transaction-tracker';
@@ -8,7 +7,6 @@ import { Portfolio, Position, PerformanceMetrics } from '../../types';
 export class PortfolioTracker {
   private static instance: PortfolioTracker;
   private walletManager: WalletManager;
-  private priceFeedManager: PriceFeedManager;
   private costBasisTracker: CostBasisTracker;
   private dbManager: DatabaseManager;
   private transactionTracker: TransactionTracker;
@@ -16,7 +14,6 @@ export class PortfolioTracker {
 
   private constructor() {
     this.walletManager = WalletManager.getInstance();
-    this.priceFeedManager = PriceFeedManager.getInstance();
     this.costBasisTracker = CostBasisTracker.getInstance();
     this.dbManager = DatabaseManager.getInstance();
     this.transactionTracker = TransactionTracker.getInstance();
@@ -43,11 +40,11 @@ export class PortfolioTracker {
       // Get SOL balance and token positions
       const { sol: solBalance, tokens: tokenPositions } = await this.walletManager.refreshBalances();
 
-      // Create SOL position
-      const solPosition = await this.createSolPosition(solBalance);
+      // Create SOL position (without price for rate limit safety)
+      const solPosition = await this.createSolPositionBasic(solBalance);
 
-      // Enrich token positions with price and metadata
-      const enrichedTokenPositions = await this.enrichPositions(tokenPositions);
+      // Get token positions (without prices for rate limit safety)
+      const enrichedTokenPositions = await this.getTokenPositionsBasic(tokenPositions);
 
       // Combine SOL and token positions
       const allPositions = solBalance > 0 ? [solPosition, ...enrichedTokenPositions] : enrichedTokenPositions;
@@ -77,11 +74,63 @@ export class PortfolioTracker {
     }
   }
 
-  private async createSolPosition(solBalance: number): Promise<Position> {
-    // Get SOL price
+  public async updatePortfolioWithPrices(): Promise<Portfolio> {
+    // This method uses the same logic as basic portfolio
+    // Price fetching is disabled to prevent rate limiting
+    return this.updatePortfolio();
+  }
+
+  public async updatePortfolioWithRealPrices(): Promise<Portfolio> {
+    if (!this.walletManager.isConnected()) {
+      throw new Error('Wallet not connected');
+    }
+
+    try {
+      const walletPublicKey = this.walletManager.getPublicKey();
+      if (!walletPublicKey) {
+        throw new Error('Wallet public key not available');
+      }
+
+      // Get SOL balance and token positions (NO transaction sync)
+      const { sol: solBalance, tokens: tokenPositions } = await this.walletManager.refreshBalances();
+
+      // Create SOL position without external API calls
+      const solPosition = await this.createSolPositionBasic(solBalance);
+
+      // Get token positions without external API calls
+      const enrichedTokenPositions = await this.getTokenPositionsBasic(tokenPositions);
+
+      // Combine SOL and token positions
+      const allPositions = solBalance > 0 ? [solPosition, ...enrichedTokenPositions] : enrichedTokenPositions;
+
+      // Calculate portfolio totals
+      const totalValue = this.calculateTotalValue(allPositions);
+      const totalUnrealizedPnL = this.calculateTotalUnrealizedPnL(allPositions);
+      const totalUnrealizedPnLPercent = totalValue > 0 ? (totalUnrealizedPnL / totalValue) * 100 : 0;
+
+      this.currentPortfolio = {
+        walletAddress: walletPublicKey.toBase58(),
+        positions: allPositions,
+        totalValue,
+        totalUnrealizedPnL,
+        totalUnrealizedPnLPercent,
+        solBalance,
+        lastUpdated: new Date(),
+      };
+
+      // Save portfolio snapshot to database
+      await this.savePortfolioSnapshot(this.currentPortfolio);
+
+      return this.currentPortfolio;
+    } catch (error) {
+      console.error('Error updating portfolio with prices:', error);
+      throw error;
+    }
+  }
+
+
+  private async createSolPositionBasic(solBalance: number): Promise<Position> {
     const solMint = 'So11111111111111111111111111111111111111112';
-    const priceResponse = await this.priceFeedManager.getPrice(solMint);
-    const solPrice = priceResponse.data?.price || 0; // Use 0 as fallback to avoid incorrect calculations
 
     const solPosition: Position = {
       tokenInfo: {
@@ -93,63 +142,33 @@ export class PortfolioTracker {
       balance: solBalance * 1e9, // Convert to lamports for consistency
       balanceUiAmount: solBalance,
       mintAddress: solMint,
-      currentPrice: solPrice,
+      currentPrice: 0, // No price fetching for rate limit safety
       lastUpdated: new Date(),
     };
 
-    // Add P&L calculation for SOL
+    // Add P&L calculation for SOL using cost basis
     return this.costBasisTracker.enrichPositionWithPnL(solPosition);
   }
 
-  private async enrichPositions(positions: Position[]): Promise<Position[]> {
-    if (positions.length === 0) {
-      return [];
-    }
+  private async getTokenPositionsBasic(positions: Position[]): Promise<Position[]> {
+    // Return positions with cost basis P&L but no price fetching
+    return Promise.all(
+      positions.map(async (position) => {
+        const enrichedPosition = {
+          ...position,
+          currentPrice: 0, // No price fetching for rate limit safety
+          lastUpdated: new Date(),
+        };
 
-    try {
-      // Get all mint addresses
-      const mintAddresses = positions.map(p => p.mintAddress);
+        // Auto-set cost basis for new tokens without price
+        this.costBasisTracker.autoSetCostBasisForNewToken(position.mintAddress);
 
-      // Fetch prices for all tokens
-      const pricesResponse = await this.priceFeedManager.getPrices(mintAddresses);
-      const priceMap = new Map<string, number>();
-
-      if (pricesResponse.success && pricesResponse.data) {
-        pricesResponse.data.forEach(priceData => {
-          priceMap.set(priceData.tokenMint, priceData.price);
-        });
-      }
-
-      // Enrich each position
-      const enrichedPositions = await Promise.all(
-        positions.map(async (position) => {
-          // Get current price
-          const currentPrice = priceMap.get(position.mintAddress) || 0;
-
-          // Enrich token info
-          const enrichedTokenInfo = await this.priceFeedManager.enrichTokenInfo(position.tokenInfo);
-
-          const enrichedPosition = {
-            ...position,
-            tokenInfo: enrichedTokenInfo,
-            currentPrice,
-            lastUpdated: new Date(),
-          };
-
-          // Auto-set cost basis for new tokens if needed (even if no current price)
-          this.costBasisTracker.autoSetCostBasisForNewToken(position.mintAddress, currentPrice > 0 ? currentPrice : undefined);
-
-          // Add P&L calculation
-          return this.costBasisTracker.enrichPositionWithPnL(enrichedPosition);
-        })
-      );
-
-      return enrichedPositions;
-    } catch (error) {
-      console.error('Error enriching positions:', error);
-      return positions;
-    }
+        // Add P&L calculation using cost basis
+        return this.costBasisTracker.enrichPositionWithPnL(enrichedPosition);
+      })
+    );
   }
+
 
   private calculateTotalValue(positions: Position[]): number {
     return positions.reduce((total, position) => {
@@ -344,35 +363,8 @@ export class PortfolioTracker {
   }
 
   public async checkForNewSwaps(): Promise<void> {
-    if (!this.walletManager.isConnected()) {
-      throw new Error('Wallet not connected');
-    }
-
-    const walletPublicKey = this.walletManager.getPublicKey();
-    if (!walletPublicKey) {
-      throw new Error('Wallet public key not available');
-    }
-
-    try {
-      // Sync recent transaction history to catch new swaps (limited to reduce rate limiting)
-      const newTransactions = await this.transactionTracker.syncTransactionHistory(walletPublicKey);
-
-      if (newTransactions > 0) {
-        console.log(`🔄 Found ${newTransactions} new transactions, updating portfolio...`);
-
-        // Update portfolio to reflect new tokens
-        await this.updatePortfolio();
-
-        // Update cost basis for any new positions
-        await this.updateCostBasisFromTransactions();
-
-        console.log('✅ Portfolio updated with new swap data');
-      } else {
-        console.log('💫 No new transactions found - portfolio is up to date');
-      }
-    } catch (error) {
-      console.error('Error checking for new swaps:', error);
-    }
+    console.log('⚡ Transaction sync disabled to prevent rate limiting');
+    console.log('💡 Use "npm run portfolio sync" to explicitly sync transaction history');
   }
 
   public async enableAutoSwapDetection(intervalMs: number = 60000): Promise<void> {

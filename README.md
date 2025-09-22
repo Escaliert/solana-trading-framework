@@ -56,10 +56,17 @@ A modular TypeScript framework for Solana portfolio monitoring, analytics, and a
 
 3. **Run portfolio monitoring**:
    ```bash
-   npm run portfolio           # Show current portfolio
-   npm run portfolio sync      # Sync blockchain transactions
+   # Rate-limit safe commands (fast, reliable)
+   npm run portfolio           # Quick portfolio status (15s) ⚡
+   npm run portfolio status    # Quick portfolio status (15s) ⚡
+   npm run portfolio show      # Portfolio with metadata (20s) ⚡
+
+   # Full sync operations (slower, rate-limited)
+   npm run portfolio sync      # Sync blockchain transactions 🐌
+   npm run portfolio watch     # Real-time monitoring
    npm run portfolio history   # Show portfolio history
-   npm run portfolio watch     # Real-time monitoring (rate-limited)
+
+   # Trading and analysis
    npm run portfolio rules     # Show trading rules
    npm run portfolio simulate SOL USDC 0.1  # Simulate swap
    npm run portfolio strategies # Show automated strategies
@@ -102,23 +109,22 @@ src/
 **Phase 1, 2, 3 & 4 are COMPLETE and fully functional!** 🎉
 
 ### Working Features:
-- Portfolio monitoring with SOL + SPL tokens
-- Real-time price feeds (with offline fallback)
+- **Portfolio monitoring** with complete SPL token detection
+- **Rate-limit safe commands** - Fast, reliable portfolio views (15-20s)
 - **Database-driven P&L** calculation with real blockchain data
-- **Transaction history sync** from Solana blockchain
+- **Transaction history sync** - Explicit sync command for blockchain data
 - **Portfolio snapshots** and historical analysis
 - **Jupiter trading integration** with swap simulation
 - **Trading rules engine** (take-profit, stop-loss)
 - **Automated trading strategies** (DCA, Grid, Rebalancing)
 - **Strategy management** and automation framework
 - **Backtesting framework** with performance metrics
-- **Rate limiting** and comprehensive error handling
-- **Enhanced CLI** interface with 11 commands
-- 🆕 **Auto-swap detection** - Automatically detects new tokens after swaps
-- 🆕 **Profit-taking alerts** - Smart recommendations for taking profits
-- 🆕 **PumpFun token support** - Recognizes and tracks PumpFun tokens
-- 🆕 **Robust rate limiting** - Eliminates 429 API errors
-- 🆕 **Smart cost basis** - Automatic cost basis for new tokens
+- **Enhanced CLI** interface with optimized command structure
+- 🆕 **Complete token detection** - All tokens in wallet (including empty/swapped)
+- 🆕 **PumpFun token support** - Auto-recognizes and tracks pump tokens
+- 🆕 **Ultra-robust rate limiting** - Circuit breaker + exponential backoff
+- 🆕 **Smart cost basis tracking** - Automatic cost basis for new tokens
+- 🆕 **Architectural optimization** - Clean separation of fast vs. sync operations
 
 ### Example Output:
 ```

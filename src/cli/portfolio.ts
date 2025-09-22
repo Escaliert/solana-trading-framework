@@ -51,11 +51,6 @@ class PortfolioCLI {
   public async showPortfolio(): Promise<void> {
     try {
       console.log('📊 Fetching portfolio data...\n');
-
-      // Check for new swaps first
-      console.log('🔄 Checking for new swaps...');
-      await this.portfolioTracker.checkForNewSwaps();
-
       const portfolio = await this.portfolioTracker.updatePortfolio();
 
       // Display portfolio summary
@@ -91,6 +86,48 @@ class PortfolioCLI {
 
     } catch (error) {
       console.error('❌ Error fetching portfolio:', error);
+    }
+  }
+
+  public async showPortfolioWithPrices(): Promise<void> {
+    try {
+      console.log('📊 Fetching portfolio data with current prices...\n');
+
+      const portfolio = await this.portfolioTracker.updatePortfolioWithPrices();
+
+      // Display portfolio summary
+      console.log(Formatter.createPortfolioSummary(portfolio));
+      console.log('\n');
+
+      // Display positions table
+      if (portfolio.positions.length > 0) {
+        console.log('💰 Token Positions:');
+        console.log(Formatter.createPositionsTable(portfolio.positions));
+      } else {
+        console.log('💰 No token positions found.');
+      }
+
+      console.log('\n');
+
+      // Show profit taking opportunities
+      console.log('💎 Profit Taking Analysis:');
+      console.log('━'.repeat(80));
+      const alerts = await this.portfolioTracker.generateTradingAlert();
+      alerts.forEach(alert => console.log(alert));
+
+      console.log('\n');
+
+      // Display performance metrics
+      const metrics = await this.portfolioTracker.getPerformanceMetrics();
+      if (metrics) {
+        console.log('📈 Performance Metrics:');
+        console.log(`Best Performer: ${metrics.bestPerformer?.tokenInfo.symbol} - ${Formatter.formatCurrency((metrics.bestPerformer?.currentPrice || 0) * (metrics.bestPerformer?.balanceUiAmount || 0))}`);
+        console.log(`Worst Performer: ${metrics.worstPerformer?.tokenInfo.symbol} - ${Formatter.formatCurrency((metrics.worstPerformer?.currentPrice || 0) * (metrics.worstPerformer?.balanceUiAmount || 0))}`);
+        console.log(`Portfolio Diversification: ${Formatter.formatPercent(metrics.portfolioDiversification * 100)}`);
+      }
+
+    } catch (error) {
+      console.error('❌ Error fetching portfolio with prices:', error);
     }
   }
 
@@ -413,8 +450,10 @@ Solana Trading Framework - Portfolio CLI
 Usage: npm run portfolio [command] [args]
 
 Portfolio Commands:
-  show                Display current portfolio with profit analysis (default)
-  watch               Monitor portfolio in real-time with auto-swap detection
+  (default)           Quick portfolio status (rate-limit safe)
+  status              Quick portfolio status (rate-limit safe)
+  show                Display portfolio with current prices (rate-limit safe)
+  watch               Monitor portfolio in real-time
   sync                Sync transaction history and update cost basis
   history             Show portfolio history
 
@@ -434,10 +473,11 @@ Strategy Commands:
   strategy stop            Stop automation
 
 Examples:
-  npm run portfolio                    # Show current portfolio
-  npm run portfolio show               # Show current portfolio
+  npm run portfolio                    # Quick status (rate-limit safe) ⚡
+  npm run portfolio status             # Quick status (rate-limit safe) ⚡
+  npm run portfolio show               # Portfolio with prices (rate-limit safe) ⚡
   npm run portfolio watch              # Start real-time monitoring
-  npm run portfolio sync               # Sync transactions and update P&L
+  npm run portfolio sync               # Sync transactions and update P&L 🐌
   npm run portfolio history            # Show portfolio history
   npm run portfolio rules              # Show trading rules
   npm run portfolio simulate SOL USDC 0.1  # Simulate SOL→USDC swap
@@ -479,7 +519,7 @@ Phase 4 - Automated Strategies:
 
 async function main() {
   const cli = new PortfolioCLI();
-  const command = process.argv[2] || 'show';
+  const command = process.argv[2] || 'status';
   const args = process.argv.slice(3);
 
   try {
@@ -488,6 +528,11 @@ async function main() {
       case '--help':
       case '-h':
         cli.displayHelp();
+        break;
+
+      case 'status':
+        await cli.initialize();
+        await cli.showPortfolio(); // Basic portfolio
         break;
 
       case 'watch':
@@ -600,9 +645,13 @@ async function main() {
         break;
 
       case 'show':
+        await cli.initialize();
+        await cli.showPortfolioWithPrices(); // Full portfolio with prices
+        break;
+
       default:
         await cli.initialize();
-        await cli.showPortfolio();
+        await cli.showPortfolio(); // Basic portfolio
         break;
     }
   } catch (error) {

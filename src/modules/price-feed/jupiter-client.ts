@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { ConfigManager } from '../../core/config';
 import { PriceData, ApiResponse, CacheEntry } from '../../types';
-import { RetryManager } from '../../utils/rate-limiter';
+import { RetryManager, RateLimiter } from '../../utils/rate-limiter';
 
 interface JupiterPriceResponse {
   data: {
@@ -22,11 +22,14 @@ export class JupiterPriceClient {
   private baseUrl: string;
   private priceCache: Map<string, CacheEntry<PriceData>> = new Map();
   private cacheTtl: number;
+  private rateLimiter: RateLimiter;
 
   private constructor() {
     this.config = ConfigManager.getInstance();
     this.baseUrl = this.config.getApiConfig().jupiter.baseUrl;
     this.cacheTtl = this.config.getSettings().priceCacheTtl;
+    // Ultra-conservative Jupiter API: 10 requests per minute with 5s delays
+    this.rateLimiter = new RateLimiter(10, 60000, 5000);
   }
 
   public static getInstance(): JupiterPriceClient {
@@ -78,6 +81,9 @@ export class JupiterPriceClient {
       // Fallback to Jupiter API if CoinGecko fails or token not mapped
       if (!priceData) {
         try {
+          // Apply rate limiting before Jupiter API call
+          await this.rateLimiter.waitIfNeeded();
+
           const response = await RetryManager.withRetry(async () => {
             return await axios.get<JupiterPriceResponse>(`${this.baseUrl}/price`, {
               params: {
@@ -85,7 +91,7 @@ export class JupiterPriceClient {
               },
               timeout: 10000,
             });
-          });
+          }, 3, 5000, this.rateLimiter);
 
           const priceInfo = response.data.data[mintAddress];
           if (priceInfo) {
