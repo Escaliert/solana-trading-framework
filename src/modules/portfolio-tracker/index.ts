@@ -330,4 +330,127 @@ export class PortfolioTracker {
       }
     }
   }
+
+  public async checkForNewSwaps(): Promise<void> {
+    if (!this.walletManager.isConnected()) {
+      throw new Error('Wallet not connected');
+    }
+
+    const walletPublicKey = this.walletManager.getPublicKey();
+    if (!walletPublicKey) {
+      throw new Error('Wallet public key not available');
+    }
+
+    try {
+      // Sync recent transaction history to catch new swaps
+      const newTransactions = await this.transactionTracker.syncTransactionHistory(walletPublicKey);
+
+      if (newTransactions > 0) {
+        console.log(`🔄 Found ${newTransactions} new transactions, updating portfolio...`);
+
+        // Update portfolio to reflect new tokens
+        await this.updatePortfolio();
+
+        // Update cost basis for any new positions
+        await this.updateCostBasisFromTransactions();
+
+        console.log('✅ Portfolio updated with new swap data');
+      }
+    } catch (error) {
+      console.error('Error checking for new swaps:', error);
+    }
+  }
+
+  public async enableAutoSwapDetection(intervalMs: number = 60000): Promise<void> {
+    console.log(`🔄 Starting automatic swap detection (${intervalMs/1000}s interval)`);
+
+    setInterval(async () => {
+      try {
+        await this.checkForNewSwaps();
+      } catch (error) {
+        console.error('Error in automatic swap detection:', error);
+      }
+    }, intervalMs);
+  }
+
+  public async getTokensInProfit(): Promise<Position[]> {
+    if (!this.currentPortfolio) {
+      await this.updatePortfolio();
+    }
+
+    if (!this.currentPortfolio) {
+      return [];
+    }
+
+    return this.costBasisTracker.getTokensWithProfit(this.currentPortfolio.positions);
+  }
+
+  public async suggestProfitTaking(): Promise<{ token: string; currentPrice: number; entryPrice: number; profitPercent: number; suggestedAction: string }[]> {
+    const tokensInProfit = await this.getTokensInProfit();
+    const suggestions: { token: string; currentPrice: number; entryPrice: number; profitPercent: number; suggestedAction: string }[] = [];
+
+    for (const position of tokensInProfit) {
+      const pnlData = this.costBasisTracker.calculatePnL(position);
+      if (pnlData && position.currentPrice) {
+        let suggestedAction = '';
+
+        if (pnlData.unrealizedPnLPercent >= 100) {
+          suggestedAction = '🚀 STRONG SELL - Take profits! 100%+ gain';
+        } else if (pnlData.unrealizedPnLPercent >= 50) {
+          suggestedAction = '💰 SELL - Excellent profit opportunity';
+        } else if (pnlData.unrealizedPnLPercent >= 20) {
+          suggestedAction = '📈 Consider selling partial position';
+        } else if (pnlData.unrealizedPnLPercent >= 10) {
+          suggestedAction = '✅ Good profit - monitor closely';
+        } else {
+          suggestedAction = '👀 Small profit - hold or watch';
+        }
+
+        suggestions.push({
+          token: position.tokenInfo.symbol,
+          currentPrice: position.currentPrice,
+          entryPrice: pnlData.entryPrice,
+          profitPercent: pnlData.unrealizedPnLPercent,
+          suggestedAction
+        });
+      }
+    }
+
+    return suggestions.sort((a, b) => b.profitPercent - a.profitPercent);
+  }
+
+  public async generateTradingAlert(): Promise<string[]> {
+    const suggestions = await this.suggestProfitTaking();
+    const alerts: string[] = [];
+
+    if (suggestions.length === 0) {
+      alerts.push('📊 No tokens currently in profit for selling');
+      return alerts;
+    }
+
+    alerts.push('🎯 PROFIT TAKING OPPORTUNITIES:');
+    alerts.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    suggestions.forEach((suggestion, index) => {
+      if (index < 5) { // Show top 5 opportunities
+        alerts.push(`${index + 1}. ${suggestion.token}: +${suggestion.profitPercent.toFixed(1)}%`);
+        alerts.push(`   Entry: $${suggestion.entryPrice.toFixed(4)} → Current: $${suggestion.currentPrice.toFixed(4)}`);
+        alerts.push(`   ${suggestion.suggestedAction}`);
+        alerts.push('');
+      }
+    });
+
+    // Add summary
+    const strongSells = suggestions.filter(s => s.profitPercent >= 50).length;
+    const moderateSells = suggestions.filter(s => s.profitPercent >= 20 && s.profitPercent < 50).length;
+
+    if (strongSells > 0) {
+      alerts.push(`🔥 ${strongSells} token(s) with 50%+ profit - Consider taking profits!`);
+    }
+    if (moderateSells > 0) {
+      alerts.push(`📈 ${moderateSells} token(s) with 20-50% profit - Monitor for exit opportunities`);
+    }
+
+    return alerts;
+  }
 }

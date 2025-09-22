@@ -52,6 +52,10 @@ class PortfolioCLI {
     try {
       console.log('📊 Fetching portfolio data...\n');
 
+      // Check for new swaps first
+      console.log('🔄 Checking for new swaps...');
+      await this.portfolioTracker.checkForNewSwaps();
+
       const portfolio = await this.portfolioTracker.updatePortfolio();
 
       // Display portfolio summary
@@ -68,6 +72,14 @@ class PortfolioCLI {
 
       console.log('\n');
 
+      // Show profit taking opportunities
+      console.log('💎 Profit Taking Analysis:');
+      console.log('━'.repeat(80));
+      const alerts = await this.portfolioTracker.generateTradingAlert();
+      alerts.forEach(alert => console.log(alert));
+
+      console.log('\n');
+
       // Display performance metrics
       const metrics = await this.portfolioTracker.getPerformanceMetrics();
       if (metrics) {
@@ -79,6 +91,32 @@ class PortfolioCLI {
 
     } catch (error) {
       console.error('❌ Error fetching portfolio:', error);
+    }
+  }
+
+  public async syncTransactions(): Promise<void> {
+    try {
+      console.log('🔄 Syncing transaction history and updating cost basis...\n');
+
+      // Check for new swaps and update cost basis
+      await this.portfolioTracker.checkForNewSwaps();
+
+      // Update portfolio to reflect any changes
+      const portfolio = await this.portfolioTracker.updatePortfolio();
+
+      console.log('✅ Transaction sync completed');
+      console.log(`📊 Portfolio updated: ${portfolio.positions.length} positions tracked`);
+      console.log(`💰 Total value: ${Formatter.formatCurrency(portfolio.totalValue)}`);
+
+      // Show profit opportunities after sync
+      const alerts = await this.portfolioTracker.generateTradingAlert();
+      if (alerts.length > 1) { // More than just the header
+        console.log('\n💎 Updated Profit Opportunities:');
+        alerts.forEach(alert => console.log(alert));
+      }
+
+    } catch (error) {
+      console.error('❌ Error syncing transactions:', error);
     }
   }
 
@@ -109,22 +147,6 @@ class PortfolioCLI {
     }, safeInterval);
   }
 
-  public async syncTransactions(): Promise<void> {
-    try {
-      console.log('🔄 Syncing transaction history from Solana blockchain...\n');
-
-      const syncedCount = await this.portfolioTracker.syncTransactionHistory();
-      console.log(`✅ Synced ${syncedCount} new transactions\n`);
-
-      if (syncedCount > 0) {
-        console.log('🔄 Updating cost basis from transaction history...');
-        await this.portfolioTracker.updateCostBasisFromTransactions();
-        console.log('✅ Cost basis updated\n');
-      }
-    } catch (error) {
-      console.error('❌ Error syncing transactions:', error);
-    }
-  }
 
   public async showHistory(): Promise<void> {
     try {
@@ -391,8 +413,8 @@ Solana Trading Framework - Portfolio CLI
 Usage: npm run portfolio [command] [args]
 
 Portfolio Commands:
-  show                Display current portfolio (default)
-  watch               Monitor portfolio in real-time
+  show                Display current portfolio with profit analysis (default)
+  watch               Monitor portfolio in real-time with auto-swap detection
   sync                Sync transaction history and update cost basis
   history             Show portfolio history
 
@@ -428,14 +450,17 @@ Configuration:
   Copy .env.example to .env and configure your settings
 
 Features:
-  ✅ Real-time portfolio monitoring
-  ✅ P&L calculation with cost basis tracking
+  ✅ Real-time portfolio monitoring with auto-swap detection
+  ✅ Advanced P&L calculation with automatic cost basis tracking
   ✅ Transaction history sync from blockchain
   ✅ Portfolio snapshots and history
   ✅ Jupiter trading integration (simulation)
   ✅ Trading rules engine (dry-run mode)
   ✅ Rate limiting and retry logic
   ✅ Offline mode with price fallbacks
+  🆕 Automatic new token detection after swaps
+  🆕 Profit-taking alerts and recommendations
+  🆕 Real-time cost basis updates from swaps
 
 Phase 3 - Trading Engine:
   🟢 Jupiter swap quotes and simulation

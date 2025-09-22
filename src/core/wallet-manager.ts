@@ -78,8 +78,12 @@ export class WalletManager {
       const positions: Position[] = [];
 
       for (const account of tokenAccounts) {
-        // Skip accounts with zero balance
-        if (parseFloat(account.tokenAmount.amount) === 0) {
+        // Skip accounts with zero balance, but use a very small threshold to catch dust amounts
+        const balance = parseFloat(account.tokenAmount.amount);
+        const uiBalance = parseFloat(account.tokenAmount.uiAmountString || '0');
+
+        // Skip only if both raw and UI balance are exactly zero
+        if (balance === 0 && uiBalance === 0) {
           continue;
         }
 
