@@ -342,7 +342,7 @@ export class PortfolioTracker {
     }
 
     try {
-      // Sync recent transaction history to catch new swaps
+      // Sync recent transaction history to catch new swaps (limited to reduce rate limiting)
       const newTransactions = await this.transactionTracker.syncTransactionHistory(walletPublicKey);
 
       if (newTransactions > 0) {
@@ -355,6 +355,8 @@ export class PortfolioTracker {
         await this.updateCostBasisFromTransactions();
 
         console.log('✅ Portfolio updated with new swap data');
+      } else {
+        console.log('💫 No new transactions found - portfolio is up to date');
       }
     } catch (error) {
       console.error('Error checking for new swaps:', error);

@@ -1,6 +1,7 @@
 import { PublicKey, ConfirmedSignatureInfo, ParsedTransactionWithMeta } from '@solana/web3.js';
 import { SolanaRpcClient } from '../../core/rpc-client';
 import { DatabaseManager, DatabaseTransaction } from '../../core/database';
+import { RateLimiter, RetryManager } from '../../utils/rate-limiter';
 
 export interface TransactionAnalysis {
   signature: string;
@@ -16,10 +17,13 @@ export class TransactionTracker {
   private static instance: TransactionTracker;
   private rpcClient: SolanaRpcClient;
   private dbManager: DatabaseManager;
+  private rateLimiter: RateLimiter;
 
   private constructor() {
     this.rpcClient = SolanaRpcClient.getInstance();
     this.dbManager = DatabaseManager.getInstance();
+    // Conservative rate limiting: 3 requests per minute, 2 second min delay
+    this.rateLimiter = new RateLimiter(3, 60000, 2000);
   }
 
   public static getInstance(): TransactionTracker {
@@ -37,8 +41,8 @@ export class TransactionTracker {
       const signatures = await this.getSignatures(walletAddress, limit);
       console.log(`Found ${signatures.length} signatures`);
 
-      // Analyze transactions in batches
-      const batchSize = 10;
+      // Analyze transactions in smaller batches with delays to prevent rate limiting
+      const batchSize = 3; // Reduced batch size
       const analyses: TransactionAnalysis[] = [];
 
       for (let i = 0; i < signatures.length; i += batchSize) {
@@ -48,6 +52,8 @@ export class TransactionTracker {
 
         // Progress indication
         console.log(`Analyzed ${Math.min(i + batchSize, signatures.length)}/${signatures.length} transactions`);
+
+        // Note: Rate limiting is now handled by the RateLimiter in analyzeBatch
       }
 
       return analyses;
@@ -74,8 +80,13 @@ export class TransactionTracker {
 
     for (const sigInfo of signatures) {
       try {
-        const transaction = await connection.getParsedTransaction(sigInfo.signature, {
-          maxSupportedTransactionVersion: 0
+        // Use rate limiter before each request
+        await this.rateLimiter.waitIfNeeded();
+
+        const transaction = await RetryManager.withRetry(async () => {
+          return await connection.getParsedTransaction(sigInfo.signature, {
+            maxSupportedTransactionVersion: 0
+          });
         });
 
         if (transaction) {
@@ -91,6 +102,7 @@ export class TransactionTracker {
 
     return analyses;
   }
+
 
   private async analyzeTransaction(
     transaction: ParsedTransactionWithMeta,
@@ -235,7 +247,8 @@ export class TransactionTracker {
     try {
       console.log('🔄 Syncing transaction history...');
 
-      const analyses = await this.fetchAndAnalyzeTransactions(walletAddress, 50);
+      // Reduced from 50 to 10 to prevent rate limiting
+      const analyses = await this.fetchAndAnalyzeTransactions(walletAddress, 10);
       let savedCount = 0;
 
       for (const analysis of analyses) {
