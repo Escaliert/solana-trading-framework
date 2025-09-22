@@ -114,18 +114,36 @@ src/
 - **Backtesting framework** with performance metrics
 - **Rate limiting** and comprehensive error handling
 - **Enhanced CLI** interface with 11 commands
+- 🆕 **Auto-swap detection** - Automatically detects new tokens after swaps
+- 🆕 **Profit-taking alerts** - Smart recommendations for taking profits
+- 🆕 **PumpFun token support** - Recognizes and tracks PumpFun tokens
+- 🆕 **Robust rate limiting** - Eliminates 429 API errors
+- 🆕 **Smart cost basis** - Automatic cost basis for new tokens
 
 ### Example Output:
 ```
 Portfolio Summary - AA2d...x2R9
-Total Portfolio Value: $10.50
-Unrealized P&L: +$1.67 (+15.94%)
+Last Updated: 09/22/2025, 11:43:42 AM
+
+Total Portfolio Value: $12.22
+SOL Balance: 0.0439 SOL
+Number of Positions: 3
+Unrealized P&L: $3.60 (+29.46%)
 
 Token Positions:
-| Token   | Amount | Price   | Value | P&L      | %        |
-|---------|--------|---------|-------|----------|----------|
-| SOL     | 0.0471 | $140.00 | $6.60 | +$0.94   | +16.67%  |
-| JUP     | 4.8719 | $0.80   | $3.90 | +$0.73   | +23.08%  |
+| Token        | Symbol | Amount         | Price       | Value | P&L      | %        |
+|--------------|--------|----------------|-------------|-------|----------|----------|
+| Solana       | SOL    | 0.0439         | $221.550000 | $9.72 | +$4.46   | +84.63%  |
+| Token CAnihS | CANI   | 1,838,613.2257 | N/A         | $0.00 | N/A      | N/A      |
+| Jupiter      | JUP    | 4.8719         | $0.473911   | $2.31 | -$0.86   | -27.09%  |
+
+💎 Profit Taking Analysis:
+🎯 PROFIT TAKING OPPORTUNITIES:
+1. SOL: +84.6%
+   Entry: $120.0000 → Current: $221.5500
+   💰 SELL - Excellent profit opportunity
+
+🔥 1 token(s) with 50%+ profit - Consider taking profits!
 
 Portfolio History:
 09/21/2025, 01:48:24 PM | Value: $10.50 | P&L: +$1.67 | Positions: 3

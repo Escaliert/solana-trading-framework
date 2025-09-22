@@ -50,6 +50,12 @@ export class CostBasisTracker {
         totalQuantity: 0,
         lastUpdated: new Date(),
       },
+      {
+        mint: 'CAnihSk8tbqehyjVtZvFAkX7AC2JnYdmCqXpUDm1pump', // PumpFun token
+        averagePrice: 0.0000001, // Very small price as placeholder for new PumpFun token
+        totalQuantity: 0,
+        lastUpdated: new Date(),
+      },
     ];
 
     defaultCostBasis.forEach(entry => {
@@ -86,8 +92,18 @@ export class CostBasisTracker {
   public calculatePnL(position: Position): { unrealizedPnL: number; unrealizedPnLPercent: number; entryPrice: number } | null {
     const costBasis = this.getCostBasis(position.mintAddress);
 
-    if (!costBasis || !position.currentPrice) {
+    if (!costBasis) {
       return null;
+    }
+
+    // For tokens without current price, we can't calculate P&L accurately
+    // But we can still show the entry price
+    if (!position.currentPrice || position.currentPrice <= 0) {
+      return {
+        unrealizedPnL: 0,
+        unrealizedPnLPercent: 0,
+        entryPrice: costBasis.averagePrice,
+      };
     }
 
     const entryPrice = costBasis.averagePrice;
@@ -182,5 +198,32 @@ export class CostBasisTracker {
     const colorEmoji = pnlData.unrealizedPnLPercent >= 0 ? '🟢' : '🔴';
 
     return `${colorEmoji} ${position.tokenInfo.symbol}: ${profitEmoji} $${pnlData.unrealizedPnL.toFixed(2)} (${pnlData.unrealizedPnLPercent.toFixed(1)}%)`;
+  }
+
+  public autoSetCostBasisForNewToken(mint: string, estimatedPrice?: number): void {
+    const existing = this.getCostBasis(mint);
+    if (existing) {
+      console.log(`Token ${mint.slice(0, 8)}... already has cost basis: $${existing.averagePrice}`);
+      return; // Already has cost basis
+    }
+
+    console.log(`Setting cost basis for new token: ${mint.slice(0, 8)}...`);
+
+    // For new tokens, set a very small estimated cost basis
+    // This could be improved with DEX price lookups
+    let defaultPrice = 0.0000001; // Very small default
+
+    if (estimatedPrice && estimatedPrice > 0) {
+      defaultPrice = estimatedPrice;
+    }
+
+    // Check if it's a PumpFun token (ending with "pump")
+    if (mint.endsWith('pump')) {
+      defaultPrice = 0.0000001; // PumpFun tokens are usually very cheap initially
+      console.log(`🎯 Detected PumpFun token: ${mint.slice(0, 8)}... setting micro cost basis`);
+    }
+
+    this.setCostBasis(mint, defaultPrice);
+    console.log(`📊 Auto-set cost basis for new token ${mint.slice(0, 8)}...: $${defaultPrice}`);
   }
 }

@@ -136,6 +136,9 @@ export class PortfolioTracker {
             lastUpdated: new Date(),
           };
 
+          // Auto-set cost basis for new tokens if needed (even if no current price)
+          this.costBasisTracker.autoSetCostBasisForNewToken(position.mintAddress, currentPrice > 0 ? currentPrice : undefined);
+
           // Add P&L calculation
           return this.costBasisTracker.enrichPositionWithPnL(enrichedPosition);
         })
@@ -150,8 +153,13 @@ export class PortfolioTracker {
 
   private calculateTotalValue(positions: Position[]): number {
     return positions.reduce((total, position) => {
-      if (position.currentPrice) {
+      if (position.currentPrice && position.currentPrice > 0) {
         return total + (position.balanceUiAmount * position.currentPrice);
+      }
+      // For tokens without price, try to use cost basis for rough estimation
+      if (position.entryPrice && position.entryPrice > 0) {
+        console.log(`Using cost basis for ${position.tokenInfo.symbol}: $${position.entryPrice}`);
+        return total + (position.balanceUiAmount * position.entryPrice);
       }
       return total;
     }, 0);
@@ -180,8 +188,12 @@ export class PortfolioTracker {
     }
 
     return [...this.currentPortfolio.positions].sort((a, b) => {
-      const aValue = (a.currentPrice || 0) * a.balanceUiAmount;
-      const bValue = (b.currentPrice || 0) * b.balanceUiAmount;
+      // Use current price if available, fallback to entry price
+      const aPrice = (a.currentPrice && a.currentPrice > 0) ? a.currentPrice : (a.entryPrice || 0);
+      const bPrice = (b.currentPrice && b.currentPrice > 0) ? b.currentPrice : (b.entryPrice || 0);
+
+      const aValue = aPrice * a.balanceUiAmount;
+      const bValue = bPrice * b.balanceUiAmount;
       return bValue - aValue; // Descending order
     });
   }
