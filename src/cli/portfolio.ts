@@ -50,8 +50,8 @@ class PortfolioCLI {
 
   public async showPortfolio(): Promise<void> {
     try {
-      console.log('📊 Fetching portfolio data...\n');
-      const portfolio = await this.portfolioTracker.updatePortfolio();
+      console.log('📊 Fetching portfolio data with prices...\n');
+      const portfolio = await this.portfolioTracker.updatePortfolioWithSmartPricing();
 
       // Display portfolio summary
       console.log(Formatter.createPortfolioSummary(portfolio));
@@ -131,12 +131,66 @@ class PortfolioCLI {
     }
   }
 
+  public async showPortfolioWithLivePrices(): Promise<void> {
+    try {
+      console.log('📊 Fetching portfolio with live prices...\n');
+
+      const portfolio = await this.portfolioTracker.updatePortfolioWithRealPrices();
+
+      // Filter out tokens under $0.01 value
+      const filteredPositions = portfolio.positions.filter(position => {
+        const value = (position.currentPrice || 0) * position.balanceUiAmount;
+        const isActive = position.balanceUiAmount > 0;
+        const isSignificant = value >= 0.01; // $0.01 threshold
+
+        return isActive && isSignificant;
+      });
+
+      const filteredPortfolio = {
+        ...portfolio,
+        positions: filteredPositions
+      };
+
+      // Display portfolio summary
+      console.log(Formatter.createPortfolioSummary(filteredPortfolio));
+      console.log('\n');
+
+      // Display positions table
+      if (filteredPortfolio.positions.length > 0) {
+        console.log('💰 Token Positions (≥ $0.01):');
+        console.log(Formatter.createPositionsTable(filteredPortfolio.positions));
+
+        const hiddenCount = portfolio.positions.length - filteredPositions.length;
+        if (hiddenCount > 0) {
+          console.log(`\n🔍 ${hiddenCount} token(s) hidden (< $0.01 value)`);
+        }
+      } else {
+        console.log('💰 No significant token positions found (all < $0.01).');
+      }
+
+      console.log('\n');
+
+      // Show profit taking opportunities
+      console.log('💎 Profit Taking Analysis:');
+      console.log('━'.repeat(80));
+      const alerts = await this.portfolioTracker.generateTradingAlert();
+      alerts.forEach(alert => console.log(alert));
+
+    } catch (error) {
+      console.error('❌ Error fetching portfolio with live prices:', error);
+    }
+  }
+
   public async syncTransactions(): Promise<void> {
     try {
       console.log('🔄 Syncing transaction history and updating cost basis...\n');
 
-      // Check for new swaps and update cost basis
-      await this.portfolioTracker.checkForNewSwaps();
+      // Sync real transaction history from blockchain
+      const syncedCount = await this.portfolioTracker.syncTransactionHistory();
+      console.log(`📈 Synced ${syncedCount} transactions from blockchain`);
+
+      // Update cost basis from real transactions
+      await this.portfolioTracker.updateCostBasisFromTransactions();
 
       // Update portfolio to reflect any changes
       const portfolio = await this.portfolioTracker.updatePortfolio();
@@ -159,24 +213,25 @@ class PortfolioCLI {
 
   public async watchPortfolio(): Promise<void> {
     console.log('👀 Starting real-time portfolio monitoring...');
-    console.log('⚠️  Using longer intervals to prevent rate limiting');
+    console.log('⚠️  Using conservative intervals to prevent rate limiting');
+    console.log('💰 Fetching live prices and P&L data');
     console.log('Press Ctrl+C to stop\n');
 
-    // Initial display
-    await this.showPortfolio();
+    // Initial display with prices
+    await this.showPortfolioWithLivePrices();
 
     // Start watching with longer interval to prevent rate limiting
     const baseInterval = this.config.getSettings().portfolioRefreshInterval;
-    const safeInterval = Math.max(baseInterval, 30000); // Minimum 30 seconds
+    const safeInterval = Math.max(baseInterval, 45000); // Minimum 45 seconds for price fetching
 
-    console.log(`🔄 Update interval: ${safeInterval / 1000}s (rate-limit safe)\n`);
+    console.log(`🔄 Update interval: ${safeInterval / 1000}s (includes live prices)\n`);
 
     setInterval(async () => {
       try {
         console.clear();
         console.log('🔄 Portfolio Update - ' + new Date().toLocaleTimeString());
         console.log(''.padEnd(50, '='));
-        await this.showPortfolio();
+        await this.showPortfolioWithLivePrices();
       } catch (error) {
         console.error('❌ Error updating portfolio in real-time:', error);
         console.log('⏳ Continuing with next update cycle...\n');

@@ -1,4 +1,5 @@
 import { WalletManager } from '../../core/wallet-manager';
+import { PriceFeedManager } from '../price-feed';
 import { CostBasisTracker } from './cost-basis-tracker';
 import { DatabaseManager, PortfolioSnapshot } from '../../core/database';
 import { TransactionTracker } from '../transaction-tracker';
@@ -7,6 +8,7 @@ import { Portfolio, Position, PerformanceMetrics } from '../../types';
 export class PortfolioTracker {
   private static instance: PortfolioTracker;
   private walletManager: WalletManager;
+  private priceFeedManager: PriceFeedManager;
   private costBasisTracker: CostBasisTracker;
   private dbManager: DatabaseManager;
   private transactionTracker: TransactionTracker;
@@ -14,6 +16,7 @@ export class PortfolioTracker {
 
   private constructor() {
     this.walletManager = WalletManager.getInstance();
+    this.priceFeedManager = PriceFeedManager.getInstance();
     this.costBasisTracker = CostBasisTracker.getInstance();
     this.dbManager = DatabaseManager.getInstance();
     this.transactionTracker = TransactionTracker.getInstance();
@@ -75,9 +78,8 @@ export class PortfolioTracker {
   }
 
   public async updatePortfolioWithPrices(): Promise<Portfolio> {
-    // This method uses the same logic as basic portfolio
-    // Price fetching is disabled to prevent rate limiting
-    return this.updatePortfolio();
+    // Use real prices but with conservative rate limiting
+    return this.updatePortfolioWithRealPrices();
   }
 
   public async updatePortfolioWithRealPrices(): Promise<Portfolio> {
@@ -91,14 +93,14 @@ export class PortfolioTracker {
         throw new Error('Wallet public key not available');
       }
 
-      // Get SOL balance and token positions (NO transaction sync)
+      // Get SOL balance and token positions
       const { sol: solBalance, tokens: tokenPositions } = await this.walletManager.refreshBalances();
 
-      // Create SOL position without external API calls
-      const solPosition = await this.createSolPositionBasic(solBalance);
+      // Create SOL position with live price (conservative rate limiting)
+      const solPosition = await this.createSolPositionWithPrice(solBalance);
 
-      // Get token positions without external API calls
-      const enrichedTokenPositions = await this.getTokenPositionsBasic(tokenPositions);
+      // Enrich token positions with live prices (conservative rate limiting)
+      const enrichedTokenPositions = await this.enrichPositionsWithPrices(tokenPositions);
 
       // Combine SOL and token positions
       const allPositions = solBalance > 0 ? [solPosition, ...enrichedTokenPositions] : enrichedTokenPositions;
@@ -128,6 +130,291 @@ export class PortfolioTracker {
     }
   }
 
+  public async updatePortfolioWithSmartPricing(): Promise<Portfolio> {
+    if (!this.walletManager.isConnected()) {
+      throw new Error('Wallet not connected');
+    }
+
+    try {
+      const walletPublicKey = this.walletManager.getPublicKey();
+      if (!walletPublicKey) {
+        throw new Error('Wallet public key not available');
+      }
+
+      // Get SOL balance and token positions
+      const { sol: solBalance, tokens: tokenPositions } = await this.walletManager.refreshBalances();
+
+      // Create SOL position with price (smart rate limiting)
+      const solPosition = await this.createSolPositionWithPrice(solBalance);
+
+      // Enrich ALL token positions with smart price fetching
+      const enrichedTokenPositions = await this.enrichPositionsSmartly(tokenPositions);
+
+      // Combine SOL and token positions
+      const allPositions = solBalance > 0 ? [solPosition, ...enrichedTokenPositions] : enrichedTokenPositions;
+
+      // Calculate portfolio totals
+      const totalValue = this.calculateTotalValue(allPositions);
+      const totalUnrealizedPnL = this.calculateTotalUnrealizedPnL(allPositions);
+      const totalUnrealizedPnLPercent = totalValue > 0 ? (totalUnrealizedPnL / totalValue) * 100 : 0;
+
+      this.currentPortfolio = {
+        walletAddress: walletPublicKey.toBase58(),
+        positions: allPositions,
+        totalValue,
+        totalUnrealizedPnL,
+        totalUnrealizedPnLPercent,
+        solBalance,
+        lastUpdated: new Date(),
+      };
+
+      // Save portfolio snapshot to database
+      await this.savePortfolioSnapshot(this.currentPortfolio);
+
+      return this.currentPortfolio;
+    } catch (error) {
+      console.error('Error updating portfolio with smart pricing:', error);
+      throw error;
+    }
+  }
+
+  private async enrichPositionsSmartly(positions: Position[]): Promise<Position[]> {
+    if (positions.length === 0) {
+      return [];
+    }
+
+    try {
+      // Only process tokens with balance > 0
+      const activePositions = positions.filter(p => p.balanceUiAmount > 0);
+      console.log(`💰 Fetching prices for ${activePositions.length} active tokens...`);
+
+      // Skip known dead/non-tradable tokens to prevent circuit breaker triggering
+      const deadTokens = [
+        'CAnihSk8tbqehyjVtZvFAkX7AC2JnYdmCqXpUDm1pump', // CANI - confirmed dead
+      ];
+
+      const tradablePositions = activePositions.filter(p => !deadTokens.includes(p.mintAddress));
+      console.log(`💰 Skipping ${activePositions.length - tradablePositions.length} dead tokens, processing ${tradablePositions.length} tradable tokens...`);
+
+      const priceMap = new Map<string, number>();
+
+      // Fetch prices for tradable tokens only
+      for (let i = 0; i < tradablePositions.length; i++) {
+        const position = tradablePositions[i];
+
+        try {
+          console.log(`💰 ${i+1}/${tradablePositions.length}: Fetching price for ${position.tokenInfo.symbol}...`);
+          const priceResponse = await this.priceFeedManager.getPrice(position.mintAddress);
+
+          if (priceResponse.success && priceResponse.data && priceResponse.data.price > 0) {
+            priceMap.set(position.mintAddress, priceResponse.data.price);
+            console.log(`✅ ${position.tokenInfo.symbol}: $${priceResponse.data.price}`);
+          } else {
+            console.log(`⚠️ ${position.tokenInfo.symbol}: No price found`);
+          }
+
+          // Moderate delay to respect Jupiter rate limits (60 req/min = 1 req/second)
+          const delay = 1200; // 1.2s fixed delay - allows ~50 req/min
+          if (i < tradablePositions.length - 1) {
+            console.log(`⏳ Waiting ${delay/1000}s before next request...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        } catch (error) {
+          console.warn(`⚠️ Failed to get price for ${position.tokenInfo.symbol}`);
+        }
+      }
+
+      console.log(`💰 Retrieved ${priceMap.size} prices successfully`);
+
+      // Enrich all positions (including zero balance ones)
+      const enrichedPositions = await Promise.all(
+        positions.map(async (position) => {
+          const currentPrice = priceMap.get(position.mintAddress) || 0;
+
+          // Enrich token info if we have a price (indicates it's a known/tradable token)
+          let enrichedTokenInfo = position.tokenInfo;
+          if (currentPrice > 0) {
+            try {
+              enrichedTokenInfo = await this.priceFeedManager.enrichTokenInfo(position.tokenInfo);
+            } catch (error) {
+              console.warn(`⚠️ Failed to enrich token info for ${position.tokenInfo.symbol}`);
+            }
+          }
+
+          const enrichedPosition = {
+            ...position,
+            tokenInfo: enrichedTokenInfo,
+            currentPrice,
+            lastUpdated: new Date(),
+          };
+
+          // Auto-set cost basis for new tokens with wallet address for transaction lookup
+          const walletPublicKey = this.walletManager.getPublicKey();
+          const walletAddress = walletPublicKey ? walletPublicKey.toBase58() : undefined;
+
+          // First try to get real cost basis from blockchain transactions
+          try {
+            const realCostBasis = await this.transactionTracker.calculateRealCostBasis(walletAddress || '', position.mintAddress);
+            if (realCostBasis && realCostBasis.averagePrice > 0) {
+              this.costBasisTracker.setCostBasis(position.mintAddress, realCostBasis.averagePrice);
+              console.log(`🔥 Real cost basis from blockchain: ${position.tokenInfo?.symbol || position.mintAddress.slice(0, 8)} = $${realCostBasis.averagePrice.toFixed(6)}`);
+            } else {
+              // Fallback to estimation
+              await this.costBasisTracker.autoSetCostBasisForNewToken(position.mintAddress, currentPrice > 0 ? currentPrice : undefined, walletAddress);
+            }
+          } catch (error) {
+            // Fallback to estimation
+            await this.costBasisTracker.autoSetCostBasisForNewToken(position.mintAddress, currentPrice > 0 ? currentPrice : undefined, walletAddress);
+          }
+
+          // Add P&L calculation
+          return this.costBasisTracker.enrichPositionWithPnL(enrichedPosition);
+        })
+      );
+
+      return enrichedPositions;
+    } catch (error) {
+      console.error('❌ Error enriching positions smartly:', error);
+      console.log('⚡ Falling back to basic positions without prices');
+      // Use empty string as fallback for error cases
+      return this.getTokenPositionsBasic(positions);
+    }
+  }
+
+  private async createSolPositionWithPrice(solBalance: number): Promise<Position> {
+    const solMint = 'So11111111111111111111111111111111111111112';
+
+    try {
+      console.log(`💰 Fetching SOL price...`);
+      const priceResponse = await this.priceFeedManager.getPrice(solMint);
+      const solPrice = priceResponse.data?.price || 0;
+
+      if (solPrice > 0) {
+        console.log(`✅ Got SOL price: $${solPrice}`);
+      }
+
+      const solPosition: Position = {
+        tokenInfo: {
+          mint: solMint,
+          symbol: 'SOL',
+          name: 'Solana',
+          decimals: 9,
+        },
+        balance: solBalance * 1e9,
+        balanceUiAmount: solBalance,
+        mintAddress: solMint,
+        currentPrice: solPrice,
+        lastUpdated: new Date(),
+      };
+
+      return this.costBasisTracker.enrichPositionWithPnL(solPosition);
+    } catch (error) {
+      console.warn('⚠️ Failed to get SOL price, using cost basis only');
+      return this.createSolPositionBasic(solBalance);
+    }
+  }
+
+  private async enrichPositionsWithPrices(positions: Position[]): Promise<Position[]> {
+    if (positions.length === 0) {
+      return [];
+    }
+
+    try {
+      // Get all mint addresses
+      const mintAddresses = positions.map(p => p.mintAddress);
+      console.log(`💰 Fetching prices for ${mintAddresses.length} tokens (conservative rate limiting)...`);
+
+      // Only fetch prices for major tokens with known price sources
+      const majorTokens = [
+        'So11111111111111111111111111111111111111112', // SOL
+        'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+        'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', // JUP
+        'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+      ];
+
+      const activePositions = positions.filter(p => p.balanceUiAmount > 0);
+      const majorActivePositions = activePositions.filter(p => majorTokens.includes(p.mintAddress));
+
+      console.log(`⚡ Processing ${majorActivePositions.length} major tokens only (prevent rate limits)`);
+
+      // Fetch prices only for major tokens
+      const priceMap = new Map<string, number>();
+
+      for (const position of majorActivePositions) {
+        try {
+          console.log(`💰 Fetching price for ${position.tokenInfo.symbol}...`);
+          const priceResponse = await this.priceFeedManager.getPrice(position.mintAddress);
+
+          if (priceResponse.success && priceResponse.data) {
+            priceMap.set(position.mintAddress, priceResponse.data.price);
+            console.log(`✅ Got price for ${position.tokenInfo.symbol}: $${priceResponse.data.price}`);
+          }
+
+          // Add longer delay between major token requests
+          await new Promise(resolve => setTimeout(resolve, 8000)); // 8 second delay
+        } catch (error) {
+          console.warn(`⚠️ Failed to get price for ${position.tokenInfo.symbol}`);
+        }
+      }
+
+      console.log(`💰 Retrieved ${priceMap.size} prices successfully`);
+
+      // Enrich each position
+      // Don't need wallet address in closure for now
+      const enrichedPositions = await Promise.all(
+        positions.map(async (position) => {
+          // Get current price
+          const currentPrice = priceMap.get(position.mintAddress) || 0;
+
+          // Enrich token info only if we got a price
+          let enrichedTokenInfo = position.tokenInfo;
+          if (currentPrice > 0) {
+            try {
+              enrichedTokenInfo = await this.priceFeedManager.enrichTokenInfo(position.tokenInfo);
+            } catch (error) {
+              console.warn(`⚠️ Failed to enrich token info for ${position.tokenInfo.symbol}`);
+            }
+          }
+
+          const enrichedPosition = {
+            ...position,
+            tokenInfo: enrichedTokenInfo,
+            currentPrice,
+            lastUpdated: new Date(),
+          };
+
+          // Auto-set cost basis for new tokens with wallet address for transaction lookup
+          const walletPublicKey = this.walletManager.getPublicKey();
+          const walletAddress = walletPublicKey ? walletPublicKey.toBase58() : undefined;
+
+          // First try to get real cost basis from blockchain transactions
+          try {
+            const realCostBasis = await this.transactionTracker.calculateRealCostBasis(walletAddress || '', position.mintAddress);
+            if (realCostBasis && realCostBasis.averagePrice > 0) {
+              this.costBasisTracker.setCostBasis(position.mintAddress, realCostBasis.averagePrice);
+              console.log(`🔥 Real cost basis from blockchain: ${position.tokenInfo?.symbol || position.mintAddress.slice(0, 8)} = $${realCostBasis.averagePrice.toFixed(6)}`);
+            } else {
+              // Fallback to estimation
+              await this.costBasisTracker.autoSetCostBasisForNewToken(position.mintAddress, currentPrice > 0 ? currentPrice : undefined, walletAddress);
+            }
+          } catch (error) {
+            // Fallback to estimation
+            await this.costBasisTracker.autoSetCostBasisForNewToken(position.mintAddress, currentPrice > 0 ? currentPrice : undefined, walletAddress);
+          }
+
+          // Add P&L calculation
+          return this.costBasisTracker.enrichPositionWithPnL(enrichedPosition);
+        })
+      );
+
+      return enrichedPositions;
+    } catch (error) {
+      console.error('❌ Error enriching positions with prices:', error);
+      console.log('⚡ Falling back to basic positions without prices');
+      // Use empty string as fallback for error cases
+      return this.getTokenPositionsBasic(positions);
+    }
+  }
 
   private async createSolPositionBasic(solBalance: number): Promise<Position> {
     const solMint = 'So11111111111111111111111111111111111111112';
@@ -161,7 +448,7 @@ export class PortfolioTracker {
         };
 
         // Auto-set cost basis for new tokens without price
-        this.costBasisTracker.autoSetCostBasisForNewToken(position.mintAddress);
+        await this.costBasisTracker.autoSetCostBasisForNewToken(position.mintAddress, undefined);
 
         // Add P&L calculation using cost basis
         return this.costBasisTracker.enrichPositionWithPnL(enrichedPosition);
@@ -354,7 +641,9 @@ export class PortfolioTracker {
 
         if (realCostBasis) {
           this.costBasisTracker.setCostBasis(position.mintAddress, realCostBasis.averagePrice);
-          console.log(`Updated cost basis for ${position.tokenInfo.symbol}: $${realCostBasis.averagePrice.toFixed(4)}`);
+          console.log(`🔥 Updated cost basis for ${position.tokenInfo.symbol}: $${realCostBasis.averagePrice.toFixed(6)} (from ${realCostBasis.totalQuantity} transactions)`);
+        } else {
+          console.log(`⚪ No transaction data found for ${position.tokenInfo.symbol}`);
         }
       } catch (error) {
         console.warn(`Failed to update cost basis for ${position.tokenInfo.symbol}:`, error);

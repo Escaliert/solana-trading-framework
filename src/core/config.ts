@@ -36,7 +36,7 @@ export class ConfigManager {
       },
       apis: {
         jupiter: {
-          baseUrl: process.env.JUPITER_API_URL || 'https://price.jup.ag/v6',
+          baseUrl: process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6',
         },
         birdeye: {
           ...(process.env.BIRDEYE_API_KEY && { apiKey: process.env.BIRDEYE_API_KEY }),

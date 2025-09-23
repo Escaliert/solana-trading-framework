@@ -2,6 +2,9 @@ import { Connection, PublicKey, ParsedAccountData, GetProgramAccountsFilter } fr
 import { TOKEN_PROGRAM_ID, AccountLayout } from '@solana/spl-token';
 import { ConfigManager } from './config';
 
+// Token-2022 Program ID
+const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+
 export class SolanaRpcClient {
   private static instance: SolanaRpcClient;
   private connection: Connection;
@@ -78,10 +81,29 @@ export class SolanaRpcClient {
 
   public async getParsedTokenAccounts(walletAddress: PublicKey) {
     try {
+      // Fetch from both SPL Token and Token-2022 programs
+      const [splTokenAccounts, token2022Accounts] = await Promise.all([
+        this.getParsedTokenAccountsByProgram(walletAddress, TOKEN_PROGRAM_ID),
+        this.getParsedTokenAccountsByProgram(walletAddress, TOKEN_2022_PROGRAM_ID),
+      ]);
+
+      // Combine results from both programs
+      const allAccounts = [...splTokenAccounts, ...token2022Accounts];
+      console.log(`📊 Found ${splTokenAccounts.length} SPL tokens + ${token2022Accounts.length} Token-2022 tokens = ${allAccounts.length} total`);
+
+      return allAccounts;
+    } catch (error) {
+      console.error('Error fetching parsed token accounts:', error);
+      throw error;
+    }
+  }
+
+  private async getParsedTokenAccountsByProgram(walletAddress: PublicKey, programId: PublicKey) {
+    try {
       const response = await this.connection.getParsedTokenAccountsByOwner(
         walletAddress,
         {
-          programId: TOKEN_PROGRAM_ID,
+          programId: programId,
         },
         'confirmed'
       );
@@ -98,11 +120,12 @@ export class SolanaRpcClient {
           state: info.state,
           isNative: info.isNative,
           rentExemptReserve: info.rentExemptReserve,
+          programId: programId.toBase58(), // Add program ID to track which program this token belongs to
         };
       });
     } catch (error) {
-      console.error('Error fetching parsed token accounts:', error);
-      throw error;
+      console.warn(`Warning: Could not fetch tokens from program ${programId.toBase58()}:`, error);
+      return [];
     }
   }
 

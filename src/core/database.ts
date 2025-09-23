@@ -368,4 +368,60 @@ export class DatabaseManager {
   public getDatabase(): sqlite3.Database | null {
     return this.db;
   }
+
+  public async getAllCostBasis(): Promise<any[]> {
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error('Database not initialized'));
+        return;
+      }
+
+      const query = 'SELECT * FROM cost_basis';
+      this.db.all(query, [], (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  }
+
+  public async saveCostBasis(costBasisData: {
+    mint_address: string;
+    average_price: number;
+    total_quantity: number;
+    last_updated: string;
+  }): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error('Database not initialized'));
+        return;
+      }
+
+      // Use INSERT OR REPLACE to handle updates
+      const query = `
+        INSERT OR REPLACE INTO cost_basis
+        (wallet_address, mint_address, average_price, total_quantity, last_updated)
+        VALUES (?, ?, ?, ?, ?)
+      `;
+
+      // Use a default wallet address for now - can be improved later
+      const params = [
+        'default_wallet',
+        costBasisData.mint_address,
+        costBasisData.average_price,
+        costBasisData.total_quantity,
+        costBasisData.last_updated
+      ];
+
+      this.db.run(query, params, function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
 }

@@ -143,10 +143,10 @@ export class Formatter {
         position.tokenInfo.name.substring(0, 12), // Truncate long names
         position.tokenInfo.symbol.substring(0, 8),
         position.balanceUiAmount > 0 ? this.formatNumber(position.balanceUiAmount, 4) : '0.0000',
-        position.currentPrice ? this.formatCurrency(position.currentPrice, 6) : 'N/A',
+        position.currentPrice ? this.formatCurrency(position.currentPrice, 8) : 'N/A',
         value > 0 ? this.formatCurrency(value) : '$0.00',
-        pnl !== 0 ? this.colorizeValue(pnl, this.formatCurrency(Math.abs(pnl))) : 'N/A',
-        pnlPercent !== 0 ? this.colorizePercentage(pnlPercent, this.formatPercent(pnlPercent)) : 'N/A',
+        position.entryPrice !== undefined ? this.colorizeValue(pnl, this.formatCurrency(Math.abs(pnl), 8)) : 'N/A',
+        position.entryPrice !== undefined ? this.colorizePercentage(pnlPercent, this.formatPercent(pnlPercent)) : 'N/A',
         status,
       ];
     });

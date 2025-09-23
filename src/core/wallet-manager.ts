@@ -2,16 +2,19 @@ import { PublicKey } from '@solana/web3.js';
 import { SolanaRpcClient } from './rpc-client';
 import { ConfigManager } from './config';
 import { WalletConnection, Position, TokenInfo } from '../types';
+import { PriceFeedManager } from '../modules/price-feed';
 
 export class WalletManager {
   private static instance: WalletManager;
   private rpcClient: SolanaRpcClient;
   private config: ConfigManager;
+  private priceFeedManager: PriceFeedManager;
   private walletConnection: WalletConnection | null = null;
 
   private constructor() {
     this.rpcClient = SolanaRpcClient.getInstance();
     this.config = ConfigManager.getInstance();
+    this.priceFeedManager = PriceFeedManager.getInstance();
   }
 
   public static getInstance(): WalletManager {
@@ -86,23 +89,28 @@ export class WalletManager {
 
         try {
           // Add delay before each metadata request to prevent rate limiting
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise(resolve => setTimeout(resolve, 500));
 
-          // Get token metadata from RPC client
-          const metadata = await this.rpcClient.getTokenMetadata(new PublicKey(account.mint));
+          // Get comprehensive token info from Jupiter/DexScreener
+          const tokenInfo = await this.priceFeedManager.getTokenInfo(account.mint);
 
-          const tokenInfo: TokenInfo = {
+          const finalTokenInfo: TokenInfo = tokenInfo ? {
             mint: account.mint,
-            symbol: metadata.symbol || 'Unknown',
-            name: metadata.name || 'Unknown Token',
-            decimals: metadata.decimals || account.tokenAmount.decimals,
+            symbol: tokenInfo.symbol || 'Unknown',
+            name: tokenInfo.name || 'Unknown Token',
+            decimals: tokenInfo.decimals || account.tokenAmount.decimals,
+          } : {
+            mint: account.mint,
+            symbol: account.mint.slice(0, 4).toUpperCase(),
+            name: `Token ${account.mint.slice(0, 8)}...`,
+            decimals: account.tokenAmount.decimals,
           };
 
           const balance = parseFloat(account.tokenAmount.amount) || 0;
           const uiBalance = parseFloat(account.tokenAmount.uiAmountString || '0') || 0;
 
           const position: Position = {
-            tokenInfo,
+            tokenInfo: finalTokenInfo,
             balance,
             balanceUiAmount: uiBalance,
             mintAddress: account.mint,
@@ -112,9 +120,9 @@ export class WalletManager {
           positions.push(position);
 
           if (uiBalance > 0) {
-            console.log(`✅ Token found: ${tokenInfo.symbol} - Balance: ${uiBalance}`);
+            console.log(`✅ Token found: ${finalTokenInfo.symbol} - Balance: ${uiBalance}`);
           } else {
-            console.log(`🔍 Token account found: ${tokenInfo.symbol} - Zero balance (recent swap?)`);
+            console.log(`🔍 Token account found: ${finalTokenInfo.symbol} - Zero balance (recent swap?)`);
           }
         } catch (error) {
           console.warn(`Failed to get metadata for token ${account.mint}:`, error);
