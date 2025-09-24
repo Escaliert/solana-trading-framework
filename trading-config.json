@@ -1,0 +1,55 @@
+{
+  "profitTaking": {
+    "enabled": true,
+    "targets": [
+      {
+        "id": "quick-profit",
+        "name": "25% Quick Profit",
+        "triggerPercent": 25,
+        "sellPercent": 30,
+        "enabled": true
+      },
+      {
+        "id": "good-profit",
+        "name": "50% Good Profit",
+        "triggerPercent": 50,
+        "sellPercent": 40,
+        "enabled": true
+      },
+      {
+        "id": "excellent-profit",
+        "name": "100% Excellent Profit",
+        "triggerPercent": 100,
+        "sellPercent": 60,
+        "enabled": true
+      },
+      {
+        "id": "moon-profit",
+        "name": "200% Moon Profit",
+        "triggerPercent": 200,
+        "sellPercent": 80,
+        "enabled": true
+      }
+    ],
+    "stopLoss": {
+      "enabled": false,
+      "percentage": -30
+    }
+  },
+  "riskManagement": {
+    "maxPositionSizePercent": 20,
+    "maxDailyTrades": 10,
+    "requireMinimumProfit": 5
+  },
+  "monitoring": {
+    "checkIntervalMs": 60000,
+    "priceUpdateIntervalMs": 30000,
+    "enableNotifications": true
+  },
+  "execution": {
+    "dryRun": false,
+    "slippagePercent": 1,
+    "maxPriceImpactPercent": 5,
+    "retryAttempts": 3
+  }
+}

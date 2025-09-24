@@ -1,8 +1,9 @@
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Keypair } from '@solana/web3.js';
 import { SolanaRpcClient } from './rpc-client';
 import { ConfigManager } from './config';
 import { WalletConnection, Position, TokenInfo } from '../types';
 import { PriceFeedManager } from '../modules/price-feed';
+import bs58 from 'bs58';
 
 export class WalletManager {
   private static instance: WalletManager;
@@ -10,6 +11,7 @@ export class WalletManager {
   private config: ConfigManager;
   private priceFeedManager: PriceFeedManager;
   private walletConnection: WalletConnection | null = null;
+  private keypair: Keypair | null = null;
 
   private constructor() {
     this.rpcClient = SolanaRpcClient.getInstance();
@@ -27,22 +29,43 @@ export class WalletManager {
   public async connect(): Promise<WalletConnection> {
     try {
       const walletConfig = this.config.getWalletConfig();
-      const publicKey = new PublicKey(walletConfig.publicKey);
 
-      // Validate that the public key is valid by attempting to fetch balance
+      // Try to load private key if available
+      const privateKey = process.env.PRIVATE_KEY;
+      let publicKey: PublicKey;
+      let isReadOnly = true;
+
+      if (privateKey) {
+        try {
+          // Convert base58 private key to Keypair
+          const privateKeyBytes = bs58.decode(privateKey);
+          this.keypair = Keypair.fromSecretKey(privateKeyBytes);
+          publicKey = this.keypair.publicKey;
+          isReadOnly = false;
+          console.log('🔑 Loaded private key - LIVE TRADING ENABLED');
+        } catch (error) {
+          console.warn('⚠️ Invalid private key, falling back to public key only');
+          publicKey = new PublicKey(walletConfig.publicKey);
+        }
+      } else {
+        publicKey = new PublicKey(walletConfig.publicKey);
+      }
+
+      // Validate wallet by fetching balance
       await this.rpcClient.getBalance(publicKey);
 
       this.walletConnection = {
         publicKey,
         connected: true,
-        isReadOnly: true,
+        isReadOnly,
       };
 
       console.log(`Connected to wallet: ${publicKey.toBase58()}`);
+      console.log(`Mode: ${isReadOnly ? '👁️ READ-ONLY' : '🔴 LIVE TRADING'}`);
       return this.walletConnection;
     } catch (error) {
       console.error('Failed to connect to wallet:', error);
-      throw new Error(`Invalid wallet public key: ${error}`);
+      throw new Error(`Invalid wallet configuration: ${error}`);
     }
   }
 
@@ -240,6 +263,49 @@ export class WalletManager {
       console.error('Wallet connection validation failed:', error);
       this.disconnect();
       return false;
+    }
+  }
+
+  // New methods for live trading
+  public getKeypair(): Keypair | null {
+    return this.keypair;
+  }
+
+  public canSign(): boolean {
+    return this.keypair !== null && !this.walletConnection?.isReadOnly;
+  }
+
+  public async signAndSendTransaction(transaction: any): Promise<string> {
+    if (!this.canSign() || !this.keypair) {
+      throw new Error('Cannot sign transactions - no private key available');
+    }
+
+    if (!this.walletConnection) {
+      throw new Error('Wallet not connected');
+    }
+
+    try {
+      // Sign and send transaction using RPC client
+      const connection = this.rpcClient.getConnection();
+      const signature = await connection.sendTransaction(transaction, [this.keypair], {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      });
+
+      console.log(`🔗 Transaction sent: ${signature}`);
+
+      // Wait for confirmation
+      const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+
+      if (confirmation.value.err) {
+        throw new Error(`Transaction failed: ${confirmation.value.err}`);
+      }
+
+      console.log(`✅ Transaction confirmed: ${signature}`);
+      return signature;
+    } catch (error) {
+      console.error('Error signing and sending transaction:', error);
+      throw error;
     }
   }
 }

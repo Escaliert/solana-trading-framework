@@ -2,6 +2,7 @@ import axios from 'axios';
 import { PublicKey, VersionedTransaction } from '@solana/web3.js';
 import { SolanaRpcClient } from '../../core/rpc-client';
 import { RateLimiter, RetryManager } from '../../utils/rate-limiter';
+import { WalletManager } from '../../core/wallet-manager';
 
 export interface SwapQuote {
   inputMint: string;
@@ -46,11 +47,13 @@ export interface SwapResult {
 export class JupiterTrader {
   private static instance: JupiterTrader;
   private rpcClient: SolanaRpcClient;
+  private walletManager: WalletManager;
   private rateLimiter: RateLimiter;
   private baseUrl: string;
 
   private constructor() {
     this.rpcClient = SolanaRpcClient.getInstance();
+    this.walletManager = WalletManager.getInstance();
     this.rateLimiter = new RateLimiter(3, 60000, 3000); // 3 requests per minute, 3s between
     this.baseUrl = 'https://quote-api.jup.ag/v6';
   }
@@ -240,18 +243,50 @@ export class JupiterTrader {
         };
       }
 
-      // Note: In a real implementation, you would need to sign and send the transaction
-      // For this framework, we'll simulate the execution
-      console.log('⚠️  Note: Transaction signing not implemented (read-only mode)');
+      // Try to execute the real transaction if wallet can sign
+      if (this.walletManager.canSign()) {
+        try {
+          console.log('🔑 Executing real transaction...');
 
-      return {
-        success: true,
-        signature: 'SIMULATED_EXECUTION',
-        inputAmount: amount,
-        outputAmount,
-        priceImpact,
-        timestamp: new Date(),
-      };
+          // Deserialize transaction
+          const swapTransactionBuf = Buffer.from(swapInstruction.swapInstruction, 'base64');
+          const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
+
+          // Sign and send transaction
+          const signature = await this.walletManager.signAndSendTransaction(transaction);
+
+          return {
+            success: true,
+            signature,
+            inputAmount: amount,
+            outputAmount,
+            priceImpact,
+            timestamp: new Date(),
+          };
+
+        } catch (error) {
+          console.error('❌ Real transaction failed:', error);
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Transaction failed',
+            inputAmount: amount,
+            outputAmount,
+            priceImpact,
+            timestamp: new Date(),
+          };
+        }
+      } else {
+        // Fallback to simulation
+        console.log('⚠️ Wallet cannot sign - falling back to simulation');
+        return {
+          success: true,
+          signature: 'SIMULATED_EXECUTION',
+          inputAmount: amount,
+          outputAmount,
+          priceImpact,
+          timestamp: new Date(),
+        };
+      }
 
     } catch (error) {
       console.error('Error executing swap:', error);

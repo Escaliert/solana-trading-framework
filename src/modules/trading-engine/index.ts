@@ -1,5 +1,9 @@
 export { JupiterTrader, SwapQuote, SwapResult } from './jupiter-trader';
 export { TradingRuleEngine, TradingRule, RuleExecutionResult } from './trading-rules';
+export { TradingConfigManager, TradingSettings, ProfitTarget } from './trading-config';
+export { WalletMonitor, TradingOpportunity, MonitoringStats } from './wallet-monitor';
+export { AutoTrader, TradeExecution, AutoTradingStats } from './auto-trader';
+export { TradingDaemon, DaemonStatus } from './trading-daemon';
 
 import { JupiterTrader } from './jupiter-trader';
 import { TradingRuleEngine } from './trading-rules';
