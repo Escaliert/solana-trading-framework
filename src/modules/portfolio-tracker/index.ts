@@ -248,23 +248,19 @@ export class PortfolioTracker {
             lastUpdated: new Date(),
           };
 
-          // Auto-set cost basis for new tokens with wallet address for transaction lookup
-          const walletPublicKey = this.walletManager.getPublicKey();
-          const walletAddress = walletPublicKey ? walletPublicKey.toBase58() : undefined;
+          // OPTIMIZED: Only set cost basis for tradable tokens with actual balance
+          if (position.balanceUiAmount > 0 && currentPrice > 0) {
+            // FAST PATH: Check if cost basis already exists to avoid expensive calls
+            if (!this.costBasisTracker.hasValidCostBasis(position.mintAddress)) {
+              console.log(`📊 Setting cost basis for tradable token: ${position.tokenInfo?.symbol || position.mintAddress.slice(0, 8)}...`);
 
-          // First try to get real cost basis from blockchain transactions
-          try {
-            const realCostBasis = await this.transactionTracker.calculateRealCostBasis(walletAddress || '', position.mintAddress);
-            if (realCostBasis && realCostBasis.averagePrice > 0) {
-              this.costBasisTracker.setCostBasis(position.mintAddress, realCostBasis.averagePrice);
-              console.log(`🔥 Real cost basis from blockchain: ${position.tokenInfo?.symbol || position.mintAddress.slice(0, 8)} = $${realCostBasis.averagePrice.toFixed(6)}`);
-            } else {
-              // Fallback to estimation
-              await this.costBasisTracker.autoSetCostBasisForNewToken(position.mintAddress, currentPrice > 0 ? currentPrice : undefined, walletAddress);
+              // CRITICAL FIX: Skip expensive transaction sync for performance
+              await this.costBasisTracker.autoSetCostBasisForNewToken(
+                position.mintAddress,
+                currentPrice,
+                undefined // SKIP wallet address to prevent transaction sync
+              );
             }
-          } catch (error) {
-            // Fallback to estimation
-            await this.costBasisTracker.autoSetCostBasisForNewToken(position.mintAddress, currentPrice > 0 ? currentPrice : undefined, walletAddress);
           }
 
           // Add P&L calculation
@@ -383,23 +379,19 @@ export class PortfolioTracker {
             lastUpdated: new Date(),
           };
 
-          // Auto-set cost basis for new tokens with wallet address for transaction lookup
-          const walletPublicKey = this.walletManager.getPublicKey();
-          const walletAddress = walletPublicKey ? walletPublicKey.toBase58() : undefined;
+          // OPTIMIZED: Only set cost basis for tradable tokens with actual balance
+          if (position.balanceUiAmount > 0 && currentPrice > 0) {
+            // FAST PATH: Check if cost basis already exists to avoid expensive calls
+            if (!this.costBasisTracker.hasValidCostBasis(position.mintAddress)) {
+              console.log(`📊 Setting cost basis for tradable token: ${position.tokenInfo?.symbol || position.mintAddress.slice(0, 8)}...`);
 
-          // First try to get real cost basis from blockchain transactions
-          try {
-            const realCostBasis = await this.transactionTracker.calculateRealCostBasis(walletAddress || '', position.mintAddress);
-            if (realCostBasis && realCostBasis.averagePrice > 0) {
-              this.costBasisTracker.setCostBasis(position.mintAddress, realCostBasis.averagePrice);
-              console.log(`🔥 Real cost basis from blockchain: ${position.tokenInfo?.symbol || position.mintAddress.slice(0, 8)} = $${realCostBasis.averagePrice.toFixed(6)}`);
-            } else {
-              // Fallback to estimation
-              await this.costBasisTracker.autoSetCostBasisForNewToken(position.mintAddress, currentPrice > 0 ? currentPrice : undefined, walletAddress);
+              // CRITICAL FIX: Skip expensive transaction sync for performance
+              await this.costBasisTracker.autoSetCostBasisForNewToken(
+                position.mintAddress,
+                currentPrice,
+                undefined // SKIP wallet address to prevent transaction sync
+              );
             }
-          } catch (error) {
-            // Fallback to estimation
-            await this.costBasisTracker.autoSetCostBasisForNewToken(position.mintAddress, currentPrice > 0 ? currentPrice : undefined, walletAddress);
           }
 
           // Add P&L calculation

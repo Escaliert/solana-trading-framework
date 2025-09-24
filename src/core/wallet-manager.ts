@@ -83,10 +83,21 @@ export class WalletManager {
 
       console.log(`Found ${tokenAccounts.length} token accounts in wallet`);
 
-      for (const account of tokenAccounts) {
-        // Include ALL token accounts regardless of balance
-        // This ensures we catch pump.fun tokens and recent swaps
+      // SPAM FILTER: Separate tradable tokens from spam
+      const tradableTokens = tokenAccounts.filter(account => {
+        const balance = parseFloat(account.tokenAmount.uiAmountString || '0');
+        return balance > 0; // Only process tokens with actual balance
+      });
 
+      const zeroBalanceTokens = tokenAccounts.filter(account => {
+        const balance = parseFloat(account.tokenAmount.uiAmountString || '0');
+        return balance === 0;
+      });
+
+      console.log(`💰 Processing ${tradableTokens.length} tradable tokens, skipping ${zeroBalanceTokens.length} zero-balance tokens`);
+
+      // Process tradable tokens with full metadata
+      for (const account of tradableTokens) {
         try {
           // Add delay before each metadata request to prevent rate limiting
           await new Promise(resolve => setTimeout(resolve, 500));
@@ -119,15 +130,12 @@ export class WalletManager {
 
           positions.push(position);
 
-          if (uiBalance > 0) {
-            console.log(`✅ Token found: ${finalTokenInfo.symbol} - Balance: ${uiBalance}`);
-          } else {
-            console.log(`🔍 Token account found: ${finalTokenInfo.symbol} - Zero balance (recent swap?)`);
-          }
+          console.log(`✅ Token found: ${finalTokenInfo.symbol} - Balance: ${uiBalance}`);
         } catch (error) {
           console.warn(`Failed to get metadata for token ${account.mint}:`, error);
 
           // Still include the token even without metadata
+          const uiBalance = parseFloat(account.tokenAmount.uiAmountString || '0') || 0;
           const position: Position = {
             tokenInfo: {
               mint: account.mint,
@@ -136,14 +144,35 @@ export class WalletManager {
               decimals: account.tokenAmount.decimals,
             },
             balance: parseFloat(account.tokenAmount.amount) || 0,
-            balanceUiAmount: parseFloat(account.tokenAmount.uiAmountString || '0') || 0,
+            balanceUiAmount: uiBalance,
             mintAddress: account.mint,
             lastUpdated: new Date(),
           };
 
           positions.push(position);
+          console.log(`⚠️ Unknown token added: ${account.mint.slice(0, 8)}... - Balance: ${uiBalance}`);
         }
       }
+
+      // OPTIMIZED: Add zero-balance tokens without expensive metadata calls for spam detection
+      for (const account of zeroBalanceTokens) {
+        const position: Position = {
+          tokenInfo: {
+            mint: account.mint,
+            symbol: 'DUST',
+            name: 'Dust Token',
+            decimals: account.tokenAmount.decimals,
+          },
+          balance: 0,
+          balanceUiAmount: 0,
+          mintAddress: account.mint,
+          lastUpdated: new Date(),
+        };
+
+        positions.push(position);
+      }
+
+      console.log(`🗑️ Added ${zeroBalanceTokens.length} dust tokens without metadata lookup`);
 
       console.log(`📊 Total positions detected: ${positions.length}`);
       return positions;
