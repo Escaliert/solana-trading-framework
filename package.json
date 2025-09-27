@@ -8,6 +8,9 @@
     "dev": "nodemon src/index.ts",
     "portfolio": "ts-node src/cli/portfolio.ts",
     "trading": "ts-node src/cli/trading.ts",
+    "web": "ts-node src/simple-web.ts",
+    "dashboard": "ts-node src/trading-dashboard.ts",
+    "web-dashboard": "ts-node src/web/server.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -17,10 +20,14 @@
   "dependencies": {
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
     "@types/sqlite3": "^3.1.11",
     "axios": "^1.12.2",
     "bs58": "^6.0.0",
+    "cors": "^2.8.5",
     "dotenv": "^17.2.2",
+    "express": "^5.1.0",
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {

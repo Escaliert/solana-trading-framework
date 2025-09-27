@@ -2,6 +2,7 @@ import { PortfolioTracker } from '../portfolio-tracker';
 import { TradingConfigManager } from './trading-config';
 import { Position } from '../../types';
 import { RateLimiter } from '../../utils/rate-limiter';
+import { DustFilter } from '../../utils/dust-filter';
 
 export interface MonitoringStats {
   lastCheck: Date;
@@ -44,8 +45,8 @@ export class WalletMonitor {
   private constructor() {
     this.portfolioTracker = PortfolioTracker.getInstance();
     this.tradingConfig = TradingConfigManager.getInstance();
-    // Conservative rate limiting: 3 requests per minute with 3s between requests
-    this.rateLimiter = new RateLimiter(3, 60000, 3000);
+    // Ultra-conservative rate limiting for portfolio updates: 1 request per 2 minutes
+    this.rateLimiter = new RateLimiter(1, 120000, 120000);
   }
 
   public static getInstance(): WalletMonitor {
@@ -130,7 +131,7 @@ export class WalletMonitor {
       console.log(`\n⏰ ${new Date().toISOString()} - Performing monitoring check...`);
 
       // Update portfolio (without prices to avoid rate limits)
-      const portfolio = await this.portfolioTracker.updatePortfolio();
+      const portfolio = await this.portfolioTracker.updatePortfolioWithPrices();
 
       // Analyze positions for trading opportunities
       const opportunities = await this.analyzePositions(portfolio.positions);
@@ -183,6 +184,12 @@ export class WalletMonitor {
     const opportunities: TradingOpportunity[] = [];
 
     // Only analyze positions with balance > 0 and current price
+    console.log(`🔍 Starting analysis with ${positions.length} total positions`);
+
+    positions.forEach(p => {
+      console.log(`📋 ${p.tokenInfo.symbol}: balance=${p.balanceUiAmount}, currentPrice=${p.currentPrice}, entryPrice=${p.entryPrice}`);
+    });
+
     const activePositions = positions.filter(p =>
       p.balanceUiAmount > 0 &&
       p.currentPrice &&
@@ -191,12 +198,24 @@ export class WalletMonitor {
       p.entryPrice > 0
     );
 
-    for (const position of activePositions) {
+    // Filter out dust positions from trading analysis - nur echte Dust-Token unter $0.01 ausschließen
+    const tradeablePositions = DustFilter.filterTradingOpportunities(activePositions, 0.01); // Minimum $0.01 for trading
+
+    if (activePositions.length !== tradeablePositions.length) {
+      console.log(`🗑️ Filtered out ${activePositions.length - tradeablePositions.length} dust positions from trading analysis`);
+    }
+
+    console.log(`🔍 WalletMonitor analyzing ${tradeablePositions.length} tradeable positions after dust filtering`);
+
+    for (const position of tradeablePositions) {
       try {
         const profitPercent = ((position.currentPrice! - position.entryPrice!) / position.entryPrice!) * 100;
 
+        console.log(`📊 ${position.tokenInfo.symbol}: ${profitPercent.toFixed(2)}% profit (${position.currentPrice} vs ${position.entryPrice})`);
+
         // Skip if profit is below minimum requirement
         if (profitPercent < settings.riskManagement.requireMinimumProfit) {
+          console.log(`⏭️ ${position.tokenInfo.symbol}: Below minimum ${settings.riskManagement.requireMinimumProfit}%`);
           continue;
         }
 

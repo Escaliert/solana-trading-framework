@@ -70,6 +70,9 @@ export class CostBasisTracker {
       const { DatabaseManager } = await import('../../core/database');
       const dbManager = DatabaseManager.getInstance();
 
+      // Ensure database is initialized before using it
+      await this.ensureDatabaseInitialized(dbManager);
+
       // Get all cost basis entries from database
       const costBasisEntries = await dbManager.getAllCostBasis();
 
@@ -224,10 +227,22 @@ export class CostBasisTracker {
     this.saveCostBasisToDatabase(mint, averagePrice);
   }
 
+  private async ensureDatabaseInitialized(dbManager: any): Promise<void> {
+    // Check if database is already initialized by testing if connection exists
+    if (!dbManager.getDatabase()) {
+      console.log('🔧 Database not initialized, initializing now...');
+      await dbManager.initialize();
+      console.log('✅ Database initialized successfully');
+    }
+  }
+
   private async saveCostBasisToDatabase(mint: string, averagePrice: number): Promise<void> {
     try {
       const { DatabaseManager } = await import('../../core/database');
       const dbManager = DatabaseManager.getInstance();
+
+      // Ensure database is initialized before saving
+      await this.ensureDatabaseInitialized(dbManager);
 
       await dbManager.saveCostBasis({
         mint_address: mint,
@@ -389,6 +404,10 @@ export class CostBasisTracker {
       // Get transactions for this specific token
       const { DatabaseManager } = await import('../../core/database');
       const dbManager = DatabaseManager.getInstance();
+
+      // Ensure database is initialized before querying
+      await this.ensureDatabaseInitialized(dbManager);
+
       const transactions = await dbManager.getTransactions(walletAddress, mint);
 
       if (transactions.length === 0) {

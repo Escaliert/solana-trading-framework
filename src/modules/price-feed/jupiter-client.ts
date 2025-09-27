@@ -27,8 +27,8 @@ export class JupiterPriceClient {
     // Hardcode correct Jupiter URL temporarily to fix issue
     this.baseUrl = 'https://quote-api.jup.ag/v6';
     this.cacheTtl = this.config.getSettings().priceCacheTtl;
-    // Jupiter API supports 60 req/min, use 50 with 1.5s delays - non-conservative mode
-    this.rateLimiter = new RateLimiter(50, 60000, 1500, false);
+    // Jupiter API allows 1 req/sec, use conservative 1 req per 1.5s to avoid rate limits
+    this.rateLimiter = new RateLimiter(1, 2000, 1500, false); // Jupiter: 1 req per 2s window, 1.5s delay
     console.log(`🔧 Jupiter Client using baseUrl: ${this.baseUrl}`);
   }
 
@@ -40,6 +40,20 @@ export class JupiterPriceClient {
 
   public async getPrice(mintAddress: string): Promise<ApiResponse<PriceData>> {
     try {
+      // SPECIAL CASE: USDC should always be $1.00
+      if (mintAddress === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v') {
+        return {
+          success: true,
+          data: {
+            tokenMint: mintAddress,
+            price: 1.0,
+            source: 'coingecko',
+            timestamp: new Date(),
+          },
+          timestamp: new Date(),
+        };
+      }
+
       // Check cache first
       const cached = this.getCachedPrice(mintAddress);
       if (cached) {
@@ -301,8 +315,8 @@ export class JupiterPriceClient {
     try {
       console.log(`🔍 Searching DexScreener for ${mintAddress.slice(0, 8)}...`);
 
-      // Rate limit DexScreener requests
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Optimized rate limit: Reduced from 1000ms to 750ms for better performance
+      await new Promise(resolve => setTimeout(resolve, 750));
 
       const response = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`, {
         timeout: 10000,
@@ -335,7 +349,7 @@ export class JupiterPriceClient {
     try {
       console.log(`🦅 Trying DexScreener price for ${mintAddress.slice(0, 8)}...`);
 
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Rate limit
+      await new Promise(resolve => setTimeout(resolve, 750)); // Optimized rate limit
 
       const response = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`, {
         timeout: 10000,
@@ -374,7 +388,7 @@ export class JupiterPriceClient {
     try {
       console.log(`🐦 Trying Birdeye price for ${mintAddress.slice(0, 8)}...`);
 
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Rate limit
+      await new Promise(resolve => setTimeout(resolve, 750)); // Optimized rate limit
 
       // Birdeye public API (no key required for basic price data)
       const response = await axios.get(`https://public-api.birdeye.so/public/price`, {

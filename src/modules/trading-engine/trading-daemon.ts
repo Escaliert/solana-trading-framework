@@ -2,6 +2,8 @@ import { AutoTrader } from './auto-trader';
 import { WalletMonitor } from './wallet-monitor';
 import { TradingConfigManager } from './trading-config';
 import { PortfolioTracker } from '../portfolio-tracker';
+import { BalanceMonitor, ExternalTransactionEvent } from '../balance-monitor';
+import { WalletManager } from '../../core/wallet-manager';
 
 export interface DaemonStatus {
   isRunning: boolean;
@@ -9,10 +11,12 @@ export interface DaemonStatus {
   uptime: number;
   autoTraderEnabled: boolean;
   walletMonitorEnabled: boolean;
+  balanceMonitorEnabled: boolean;
   lastActivity: Date;
   cyclesCompleted: number;
   errorsEncountered: number;
   nextCycleIn: number;
+  externalTransactionsDetected: number;
 }
 
 export class TradingDaemon {
@@ -21,6 +25,8 @@ export class TradingDaemon {
   private walletMonitor: WalletMonitor;
   private tradingConfig: TradingConfigManager;
   private portfolioTracker: PortfolioTracker;
+  private balanceMonitor: BalanceMonitor;
+  private walletManager: WalletManager;
 
   private isRunning: boolean = false;
   private daemonInterval: NodeJS.Timeout | null = null;
@@ -28,12 +34,18 @@ export class TradingDaemon {
   private lastActivity: Date = new Date();
   private cyclesCompleted: number = 0;
   private errorsEncountered: number = 0;
+  private externalTransactionsDetected: number = 0;
 
   private constructor() {
     this.autoTrader = AutoTrader.getInstance();
     this.walletMonitor = WalletMonitor.getInstance();
     this.tradingConfig = TradingConfigManager.getInstance();
     this.portfolioTracker = PortfolioTracker.getInstance();
+    this.balanceMonitor = BalanceMonitor.getInstance();
+    this.walletManager = WalletManager.getInstance();
+
+    // Set up external transaction event listener
+    this.balanceMonitor.addEventListener(this.handleExternalTransaction.bind(this));
 
     // Handle graceful shutdown
     process.on('SIGINT', () => this.handleShutdown('SIGINT'));
@@ -70,6 +82,13 @@ export class TradingDaemon {
 
       // Start monitoring
       await this.walletMonitor.startMonitoring();
+
+      // Start balance monitoring for external transactions
+      const walletAddress = this.walletManager.getPublicKey();
+      if (walletAddress) {
+        await this.balanceMonitor.startMonitoring(walletAddress);
+        console.log('🔍 Balance monitoring started for external transactions');
+      }
 
       // Enable auto trading if configured
       const settings = this.tradingConfig.getSettings();
@@ -123,6 +142,7 @@ export class TradingDaemon {
     // Stop components
     this.autoTrader.disableAutoTrading();
     this.walletMonitor.stopMonitoring();
+    this.balanceMonitor.stopMonitoring();
 
     console.log('✅ Trading Daemon stopped successfully');
 
@@ -190,6 +210,23 @@ export class TradingDaemon {
     }
   }
 
+  private handleExternalTransaction(event: ExternalTransactionEvent): void {
+    this.externalTransactionsDetected++;
+
+    console.log('🚨 External transaction detected by daemon:');
+    console.log(`   Type: ${event.transactionType}`);
+    console.log(`   Token: ${event.mintAddress.slice(0, 8)}...`);
+    console.log(`   Amount: ${event.amount.toFixed(6)}`);
+    console.log(`   Time: ${event.timestamp.toISOString()}`);
+
+    if (event.signature) {
+      console.log(`   Signature: ${event.signature.slice(0, 16)}...`);
+    }
+
+    // Log external transaction event for integration purposes
+    this.lastActivity = new Date();
+  }
+
   private async handleShutdown(signal: string): Promise<void> {
     console.log(`\n⚠️ Received ${signal} signal, shutting down gracefully...`);
 
@@ -219,10 +256,12 @@ export class TradingDaemon {
       uptime,
       autoTraderEnabled: this.autoTrader.isAutoTradingEnabled(),
       walletMonitorEnabled: this.walletMonitor.isMonitoringActive(),
+      balanceMonitorEnabled: this.balanceMonitor.getStatus().isMonitoring,
       lastActivity: this.lastActivity,
       cyclesCompleted: this.cyclesCompleted,
       errorsEncountered: this.errorsEncountered,
-      nextCycleIn: Math.floor(nextCycleIn / 1000)
+      nextCycleIn: Math.floor(nextCycleIn / 1000),
+      externalTransactionsDetected: this.externalTransactionsDetected
     };
   }
 
@@ -393,5 +432,13 @@ export class TradingDaemon {
     }
 
     console.log('\n> ');
+  }
+
+  public getOpportunities() {
+    return this.walletMonitor.getCurrentOpportunities();
+  }
+
+  public getRecentTrades() {
+    return this.autoTrader.getRecentExecutions(10);
   }
 }

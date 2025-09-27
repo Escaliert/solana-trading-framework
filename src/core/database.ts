@@ -52,6 +52,15 @@ export class DatabaseManager {
     return new Promise((resolve, reject) => {
       const dbPath = './data/portfolio.db';
 
+      // Ensure data directory exists
+      const fs = require('fs');
+      const path = require('path');
+      const dataDir = path.dirname(dbPath);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+        console.log(`📁 Created data directory: ${dataDir}`);
+      }
+
       this.db = new sqlite3.Database(dbPath, (err) => {
         if (err) {
           console.error('Error opening database:', err);

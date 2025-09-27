@@ -4,6 +4,7 @@ import { CostBasisTracker } from './cost-basis-tracker';
 import { DatabaseManager, PortfolioSnapshot } from '../../core/database';
 import { TransactionTracker } from '../transaction-tracker';
 import { Portfolio, Position, PerformanceMetrics } from '../../types';
+import { DustFilter } from '../../utils/dust-filter';
 
 export class PortfolioTracker {
   private static instance: PortfolioTracker;
@@ -105,7 +106,14 @@ export class PortfolioTracker {
       // Combine SOL and token positions
       const allPositions = solBalance > 0 ? [solPosition, ...enrichedTokenPositions] : enrichedTokenPositions;
 
-      // Calculate portfolio totals
+      // Filter dust positions for better portfolio analysis
+      const { dust: dustPositions } = DustFilter.filterDustPositions(allPositions);
+
+      if (dustPositions.length > 0) {
+        console.log(DustFilter.formatDustSummary(dustPositions));
+      }
+
+      // Calculate portfolio totals (using all positions for accurate total value)
       const totalValue = this.calculateTotalValue(allPositions);
       const totalUnrealizedPnL = this.calculateTotalUnrealizedPnL(allPositions);
       const totalUnrealizedPnLPercent = totalValue > 0 ? (totalUnrealizedPnL / totalValue) * 100 : 0;
@@ -321,22 +329,16 @@ export class PortfolioTracker {
       console.log(`💰 Fetching prices for ${mintAddresses.length} tokens (conservative rate limiting)...`);
 
       // Only fetch prices for major tokens with known price sources
-      const majorTokens = [
-        'So11111111111111111111111111111111111111112', // SOL
-        'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
-        'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', // JUP
-        'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
-      ];
+      // Removed major token filtering to process all tokens like CLI
 
       const activePositions = positions.filter(p => p.balanceUiAmount > 0);
-      const majorActivePositions = activePositions.filter(p => majorTokens.includes(p.mintAddress));
+      // Process ALL tokens with balance to get complete data like CLI
+      console.log(`⚡ Processing ALL ${activePositions.length} tokens for complete web data`);
 
-      console.log(`⚡ Processing ${majorActivePositions.length} major tokens only (prevent rate limits)`);
-
-      // Fetch prices only for major tokens
+      // Fetch prices for all tokens
       const priceMap = new Map<string, number>();
 
-      for (const position of majorActivePositions) {
+      for (const position of activePositions) {
         try {
           console.log(`💰 Fetching price for ${position.tokenInfo.symbol}...`);
           const priceResponse = await this.priceFeedManager.getPrice(position.mintAddress);
@@ -346,8 +348,8 @@ export class PortfolioTracker {
             console.log(`✅ Got price for ${position.tokenInfo.symbol}: $${priceResponse.data.price}`);
           }
 
-          // Add longer delay between major token requests
-          await new Promise(resolve => setTimeout(resolve, 8000)); // 8 second delay
+          // Optimized delay: Reduced from 8s to 2s for better performance while maintaining safety
+          await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
         } catch (error) {
           console.warn(`⚠️ Failed to get price for ${position.tokenInfo.symbol}`);
         }
@@ -502,7 +504,8 @@ export class PortfolioTracker {
     }
 
     const positions = this.currentPortfolio.positions;
-    const positionsWithValue = positions.filter(p => p.currentPrice && p.currentPrice > 0);
+    // Show all positions with balance, regardless of having current price
+    const positionsWithValue = positions.filter(p => p.balanceUiAmount > 0);
 
     if (positionsWithValue.length === 0) {
       return null;

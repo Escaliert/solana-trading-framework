@@ -8,17 +8,17 @@ export class RateLimiter {
   private consecutiveErrors: number = 0;
   private circuitBreakerUntil: number = 0;
 
-  constructor(maxRequests: number = 5, windowMs: number = 60000, minDelayMs: number = 1000, conservative: boolean = true) {
+  constructor(maxRequests: number = 5, windowMs: number = 60000, minDelayMs: number = 1500, conservative: boolean = true) {
     if (conservative) {
       // Ultra-conservative defaults for Solana public RPC
       this.maxRequests = Math.min(maxRequests, 5); // Never exceed 5 req per window
       this.windowMs = Math.max(windowMs, 30000); // Minimum 30 second windows
-      this.minDelayMs = Math.max(minDelayMs, 3000); // Minimum 3 seconds between requests
+      this.minDelayMs = Math.max(minDelayMs, 3000); // Minimum 3 seconds between requests for RPC
     } else {
-      // Allow higher limits for trusted APIs like Jupiter
+      // Jupiter rate limit: 1 request per second = 1500ms for safety
       this.maxRequests = maxRequests;
       this.windowMs = windowMs;
-      this.minDelayMs = minDelayMs;
+      this.minDelayMs = Math.max(minDelayMs, 1500); // Jupiter: 1.5 seconds between requests
     }
   }
 

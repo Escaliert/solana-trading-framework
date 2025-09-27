@@ -1,11 +1,12 @@
 {
   "profitTaking": {
     "enabled": true,
+    "fullSellThresholdUSD": 1,
     "targets": [
       {
         "id": "quick-profit",
         "name": "25% Quick Profit",
-        "triggerPercent": 25,
+        "triggerPercent": 10,
         "sellPercent": 30,
         "enabled": true
       },

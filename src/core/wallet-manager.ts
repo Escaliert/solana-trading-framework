@@ -122,8 +122,8 @@ export class WalletManager {
       // Process tradable tokens with full metadata
       for (const account of tradableTokens) {
         try {
-          // Add delay before each metadata request to prevent rate limiting
-          await new Promise(resolve => setTimeout(resolve, 500));
+          // Optimized delay: Reduced from 500ms to 250ms for better performance
+          await new Promise(resolve => setTimeout(resolve, 250));
 
           // Get comprehensive token info from Jupiter/DexScreener
           const tokenInfo = await this.priceFeedManager.getTokenInfo(account.mint);
@@ -285,23 +285,22 @@ export class WalletManager {
     }
 
     try {
-      // Sign and send transaction using RPC client
+      // Use modern sendAndConfirmTransaction instead of deprecated APIs
+      const { sendAndConfirmTransaction } = await import('@solana/web3.js');
       const connection = this.rpcClient.getConnection();
-      const signature = await connection.sendTransaction(transaction, [this.keypair], {
-        skipPreflight: false,
-        preflightCommitment: 'confirmed',
-      });
 
-      console.log(`🔗 Transaction sent: ${signature}`);
+      const signature = await sendAndConfirmTransaction(
+        connection,
+        transaction,
+        [this.keypair],
+        {
+          skipPreflight: false,
+          commitment: 'confirmed',
+          preflightCommitment: 'confirmed',
+        }
+      );
 
-      // Wait for confirmation
-      const confirmation = await connection.confirmTransaction(signature, 'confirmed');
-
-      if (confirmation.value.err) {
-        throw new Error(`Transaction failed: ${confirmation.value.err}`);
-      }
-
-      console.log(`✅ Transaction confirmed: ${signature}`);
+      console.log(`✅ Transaction sent and confirmed: ${signature}`);
       return signature;
     } catch (error) {
       console.error('Error signing and sending transaction:', error);

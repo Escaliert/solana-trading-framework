@@ -6,6 +6,7 @@ export interface TradingSettings {
   profitTaking: {
     enabled: boolean;
     targets: ProfitTarget[];
+    fullSellThresholdUSD: number; // Below this USD value, sell 100% instead of target percentage
     stopLoss?: {
       enabled: boolean;
       percentage: number; // -20% = stop loss at 20% loss
@@ -50,6 +51,7 @@ export class TradingConfigManager {
   private defaultSettings: TradingSettings = {
     profitTaking: {
       enabled: true,
+      fullSellThresholdUSD: 1.0, // Sell 100% if position value is below $1
       targets: [
         {
           id: 'quick-profit',

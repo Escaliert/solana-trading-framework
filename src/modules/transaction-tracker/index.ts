@@ -124,8 +124,8 @@ export class TransactionTracker {
       // Process sub-batch in parallel for better performance
       const subBatchPromises = subBatch.map(async (sigInfo) => {
         try {
-          // Minimal delay instead of aggressive rate limiting
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          // Optimized delay: Reduced from 1000ms to 750ms for better performance
+          await new Promise(resolve => setTimeout(resolve, 750));
 
           const transaction = await RetryManager.withRetry(async () => {
             return await connection.getParsedTransaction(sigInfo.signature, {
@@ -152,9 +152,9 @@ export class TransactionTracker {
         }
       });
 
-      // Small delay between sub-batches to respect rate limits
+      // Optimized delay between sub-batches: Reduced from 1000ms to 750ms
       if (i + subBatchSize < signatures.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 750));
       }
     }
 

@@ -30,8 +30,12 @@ export interface RoutePlan {
 }
 
 export interface SwapInstruction {
-  swapInstruction: string;
-  addressLookupTableAddresses: string[];
+  swapInstruction?: string;
+  swapTransaction?: string;
+  addressLookupTableAddresses?: string[];
+  lastValidBlockHeight?: number;
+  prioritizationFeeLamports?: number;
+  computeUnitLimit?: number;
 }
 
 export interface SwapResult {
@@ -54,7 +58,7 @@ export class JupiterTrader {
   private constructor() {
     this.rpcClient = SolanaRpcClient.getInstance();
     this.walletManager = WalletManager.getInstance();
-    this.rateLimiter = new RateLimiter(3, 60000, 3000); // 3 requests per minute, 3s between
+    this.rateLimiter = new RateLimiter(1, 2000, 1500, false); // Jupiter: 1 req per 2s, 1.5s delay
     this.baseUrl = 'https://quote-api.jup.ag/v6';
   }
 
@@ -157,7 +161,13 @@ export class JupiterTrader {
       }
 
       // Deserialize transaction
-      const swapTransactionBuf = Buffer.from(swapInstruction.swapInstruction, 'base64');
+      const transactionData = swapInstruction.swapTransaction || swapInstruction.swapInstruction;
+      if (!transactionData) {
+        console.error('No transaction data in swap instruction');
+        return null;
+      }
+
+      const swapTransactionBuf = Buffer.from(transactionData, 'base64');
       const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
 
       // Simulate transaction
@@ -249,11 +259,39 @@ export class JupiterTrader {
           console.log('🔑 Executing real transaction...');
 
           // Deserialize transaction
-          const swapTransactionBuf = Buffer.from(swapInstruction.swapInstruction, 'base64');
+          // console.log('🔍 Swap instruction response:', JSON.stringify(swapInstruction, null, 2));
+
+          const transactionData = swapInstruction.swapTransaction || swapInstruction.swapInstruction;
+
+          if (!transactionData) {
+            throw new Error('No swap transaction received from Jupiter API');
+          }
+
+          const swapTransactionBuf = Buffer.from(transactionData, 'base64');
           const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
 
-          // Sign and send transaction
-          const signature = await this.walletManager.signAndSendTransaction(transaction);
+          // Sign transaction with wallet keypair
+          const wallet = this.walletManager.getKeypair();
+          if (!wallet) {
+            throw new Error('Wallet keypair not available');
+          }
+
+          transaction.sign([wallet]);
+
+          // Send transaction directly via RPC
+          const connection = this.rpcClient.getConnection();
+          const rawTransaction = transaction.serialize();
+          const signature = await connection.sendRawTransaction(rawTransaction, {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed'
+          });
+
+          // Confirm transaction
+          const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+
+          if (confirmation.value.err) {
+            throw new Error(`Transaction failed: ${confirmation.value.err}`);
+          }
 
           return {
             success: true,

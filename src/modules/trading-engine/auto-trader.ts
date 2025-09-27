@@ -209,10 +209,39 @@ export class AutoTrader {
 
     console.log(`\n🎯 Executing trade for ${opportunity.token.tokenInfo.symbol}`);
     console.log(`📊 Profit: ${opportunity.currentProfitPercent.toFixed(2)}%`);
-    console.log(`💰 Sell ${opportunity.recommendedSellPercent}% of position`);
 
-    // Calculate sell amount
-    const sellAmount = opportunity.token.balanceUiAmount * (opportunity.recommendedSellPercent / 100);
+    // Check if position value is below threshold for full sell
+    const positionValueUSD = opportunity.token.balanceUiAmount * (opportunity.token.currentPrice || 0);
+    const fullSellThreshold = settings.profitTaking.fullSellThresholdUSD;
+
+    let finalSellPercent = opportunity.recommendedSellPercent;
+    if (positionValueUSD < fullSellThreshold) {
+      finalSellPercent = 100;
+      console.log(`💸 Position value $${positionValueUSD.toFixed(2)} < $${fullSellThreshold} → Full sell (100%)`);
+    } else {
+      console.log(`💰 Sell ${opportunity.recommendedSellPercent}% of position`);
+    }
+
+    // Calculate sell amount with balance safety checks
+    let sellAmount = opportunity.token.balanceUiAmount * (finalSellPercent / 100);
+
+    // For SOL, reserve 0.001 SOL for transaction fees
+    if (opportunity.token.mintAddress === 'So11111111111111111111111111111111111111112') {
+      const reserveAmount = 0.001; // Reserve for transaction fees
+      const maxSellable = opportunity.token.balanceUiAmount - reserveAmount;
+
+      if (maxSellable <= 0) {
+        console.log(`⚠️ Insufficient SOL balance (need ${reserveAmount} SOL for fees)`);
+        return null;
+      }
+
+      if (sellAmount > maxSellable) {
+        console.log(`⚠️ Adjusting SOL sell amount from ${sellAmount.toFixed(6)} to ${maxSellable.toFixed(6)} (fee reserve)`);
+        sellAmount = maxSellable;
+        finalSellPercent = (sellAmount / opportunity.token.balanceUiAmount) * 100;
+      }
+    }
+
     const sellAmountRaw = Math.floor(sellAmount * Math.pow(10, opportunity.token.tokenInfo.decimals));
 
     console.log(`📦 Selling ${sellAmount.toFixed(6)} ${opportunity.token.tokenInfo.symbol}`);
@@ -234,10 +263,15 @@ export class AutoTrader {
     };
 
     try {
+      // Determine output mint - SOL should be sold to USDC, other tokens to SOL
+      const outputMint = opportunity.token.mintAddress === 'So11111111111111111111111111111111111111112'
+        ? 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' // USDC
+        : 'So11111111111111111111111111111111111111112'; // SOL
+
       // Execute swap
       const swapResult: SwapResult = await this.jupiterTrader.executeSwap(
         opportunity.token.mintAddress, // input mint (token to sell)
-        'So11111111111111111111111111111111111111112', // output mint (SOL)
+        outputMint, // output mint
         sellAmountRaw,
         userPublicKey,
         this.jupiterTrader.calculateSlippageBps(settings.execution.slippagePercent),
@@ -256,14 +290,18 @@ export class AutoTrader {
       }
 
       if (swapResult.success) {
-        const proceedsUSD = (swapResult.outputAmount / 1e9) * (opportunity.token.currentPrice || 0);
+        // Calculate proceeds based on output token
+        const outputDecimals = outputMint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' ? 1e6 : 1e9;
+        const outputAmount = swapResult.outputAmount / outputDecimals;
+        const outputSymbol = outputMint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' ? 'USDC' : 'SOL';
+
         console.log(`✅ Trade executed successfully!`);
-        console.log(`💰 Received ${(swapResult.outputAmount / 1e9).toFixed(6)} SOL (~$${proceedsUSD.toFixed(2)})`);
+        console.log(`💰 Received ${outputAmount.toFixed(6)} ${outputSymbol} (~$${outputAmount.toFixed(2)})`);
         console.log(`📈 Price impact: ${swapResult.priceImpact.toFixed(4)}%`);
 
         if (settings.execution.dryRun) {
           console.log('🧪 DRY RUN - No actual trade was executed');
-        } else {
+        } else if (swapResult.signature) {
           console.log(`🔗 Transaction: ${swapResult.signature}`);
         }
       } else {
@@ -338,8 +376,24 @@ export class AutoTrader {
   }
 
   public setDailyTradeLimit(limit: number): void {
-    this.stats.dailyTradeLimit = limit;
     console.log(`✅ Daily trade limit set to ${limit}`);
+  }
+
+  public getCurrentOpportunities(): any[] {
+    return this.walletMonitor.getCurrentOpportunities();
+  }
+
+  public getStatus(): any {
+    return {
+      enabled: this.isEnabled,
+      totalTrades: 0,
+      successfulTrades: 0,
+      failedTrades: 0,
+      dailyTrades: 0,
+      dailyTradeLimit: 10,
+      successRate: 0,
+      lastExecution: this.executionHistory.length > 0 ? this.executionHistory[this.executionHistory.length - 1].timestamp : null
+    };
   }
 
   public printStatus(): void {
